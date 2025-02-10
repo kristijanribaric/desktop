@@ -832,9 +832,11 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     tabs.forEach((tab, index) => {
       tab.splitView = true;
       const container = tab.linkedBrowser.closest('.browserSidebarContainer');
-      // insert a header into the container
-      const header = this._createHeader(container);
-      container.insertBefore(header, container.firstChild);
+      if(!container.querySelector('.zen-view-splitter-header')) {
+        // insert a header into the container
+        const header = this._createHeader(container);
+        container.insertBefore(header, container.firstChild);
+      }
       this.styleContainer(container);
     });
   }
