@@ -224,7 +224,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
       b.style.pointerEvents = 'none';
       b.style.opacity = '.85';
     });
-    if(!tabDrag) {
+    if (!tabDrag) {
       this.tabBrowserPanel.addEventListener('dragstart', this.onBrowserDragStart);
       this.tabBrowserPanel.addEventListener('dragend', this.onBrowserDragEnd);
     }
@@ -264,7 +264,8 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     });
     this.rearrangeViewEnabled = false;
     this.rearrangeViewView = null;
-    if (!event?.type === 'dragend') {  // Don't show toast if exiting from drag
+    if (!event?.type === 'dragend') {
+      // Don't show toast if exiting from drag
       this.afterRearangeRemove();
     }
   };
@@ -275,7 +276,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     let browser;
     let isSplitHeaderDrag = false;
 
-    const container = event.target.closest(".browserSidebarContainer[zen-split]");
+    const container = event.target.closest('.browserSidebarContainer[zen-split]');
     if (container && event.offsetY < 20) {
       // Split tab header drag case
       const containerRect = container.getBoundingClientRect();
@@ -302,7 +303,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     this._dragState = {
       tab,
       browser,
-      isSplitHeaderDrag
+      isSplitHeaderDrag,
     };
 
     if (isSplitHeaderDrag) {
@@ -1243,14 +1244,83 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     if (browser) {
       const tab = gBrowser.getTabForBrowser(browser);
       if (tab) {
-        const groupIndex = this._data.findIndex(
-          group => group.tabs.includes(tab)
-        );
+        const groupIndex = this._data.findIndex((group) => group.tabs.includes(tab));
         if (groupIndex >= 0) {
           this.removeTabFromGroup(tab, groupIndex, true);
         }
       }
     }
+  };
+
+  /**
+   * @description moves the tab to the split view if dragged on a browser
+   * @param event - The event
+   * @param draggedTab - The dragged tab
+   * @returns {boolean} true if the tab was moved to the split view
+   */
+  moveTabToSplitView(event, draggedTab) {
+    const dropTarget = document.elementFromPoint(event.clientX, event.clientY);
+    const browser = dropTarget?.closest('browser');
+
+    if (!browser) {
+      return false;
+    }
+
+    const droppedOnTab = gBrowser.getTabForBrowser(browser);
+    if (droppedOnTab && droppedOnTab !== draggedTab) {
+      // Calculate which side of the target browser the drop occurred
+      const browserRect = browser.getBoundingClientRect();
+      const hoverSide = this.calculateHoverSide(event.clientX, event.clientY, browserRect);
+
+      if (droppedOnTab.splitView) {
+        // Add to existing split view
+        const groupIndex = this._data.findIndex((group) => group.tabs.includes(droppedOnTab));
+        const group = this._data[groupIndex];
+
+        if (!group.tabs.includes(draggedTab)) {
+          const droppedOnSplitNode = this.getSplitNodeFromTab(droppedOnTab);
+          const parentNode = droppedOnSplitNode.parent;
+
+          // Add the tab to the split view
+          group.tabs.push(draggedTab);
+
+          // If dropping on a side, create a new split in that direction
+          if (hoverSide !== 'center') {
+            const splitDirection = hoverSide === 'left' || hoverSide === 'right' ? 'row' : 'column';
+            if (parentNode.direction !== splitDirection) {
+              this.splitIntoNode(droppedOnSplitNode, new SplitLeafNode(draggedTab, 50), hoverSide, 0.5);
+            } else {
+              this.addTabToSplit(draggedTab, parentNode);
+            }
+          } else {
+            this.addTabToSplit(draggedTab, group.layoutTree);
+          }
+
+          this.activateSplitView(group, true);
+        }
+      } else {
+        // Create new split view with layout based on drop position
+        let gridType;
+        switch (hoverSide) {
+          case 'left':
+          case 'right':
+            gridType = 'vsep';
+            break;
+          case 'top':
+          case 'bottom':
+            gridType = 'hsep';
+            break;
+          default:
+            gridType = 'grid';
+        }
+
+        // Put tabs in correct order based on drop side
+        const tabs = ['left', 'top'].includes(hoverSide) ? [draggedTab, droppedOnTab] : [droppedOnTab, draggedTab];
+
+        this.splitTabs(tabs, gridType);
+      }
+    }
+    return true;
   }
 }
 
