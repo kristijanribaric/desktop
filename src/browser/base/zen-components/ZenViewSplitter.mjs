@@ -209,7 +209,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     wrapper.setAttribute('hidden', !value);
   }
 
-  enableTabRearrangeView() {
+  enableTabRearrangeView(tabDrag = false) {
     if (this.rearrangeViewEnabled) return;
     this.rearrangeViewEnabled = true;
     this.rearrangeViewView = this.currentView;
@@ -224,13 +224,19 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
       b.style.pointerEvents = 'none';
       b.style.opacity = '.85';
     });
-    this.tabBrowserPanel.addEventListener('dragstart', this.onBrowserDragStart);
+    if(!tabDrag) {
+      this.tabBrowserPanel.addEventListener('dragstart', this.onBrowserDragStart);
+      this.tabBrowserPanel.addEventListener('dragend', this.onBrowserDragEnd);
+    }
+
     this.tabBrowserPanel.addEventListener('dragover', this.onBrowserDragOver);
     this.tabBrowserPanel.addEventListener('drop', this.onBrowserDrop);
-    this.tabBrowserPanel.addEventListener('dragend', this.onBrowserDragEnd);
+
     this.tabBrowserPanel.addEventListener('click', this.disableTabRearrangeView);
     window.addEventListener('keydown', this.disableTabRearrangeView);
-    this.afterRearangeAction();
+    if (!tabDrag) {
+      this.afterRearangeAction();
+    }
   }
 
   disableTabRearrangeView = (event = null) => {
@@ -258,21 +264,56 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     });
     this.rearrangeViewEnabled = false;
     this.rearrangeViewView = null;
-    this.afterRearangeRemove();
+    if (!event?.type === 'dragend') {  // Don't show toast if exiting from drag
+      this.afterRearangeRemove();
+    }
   };
 
   onBrowserDragStart = (event) => {
     if (!this.splitViewActive) return;
-    let browser = event.target.querySelector('browser');
-    if (!browser) {
-      return;
-    }
-    browser.style.opacity = '.2';
-    const browserContainer = browser.closest('.browserSidebarContainer');
-    event.dataTransfer.setData('text/plain', browserContainer.id);
-    this._draggingTab = gBrowser.getTabForBrowser(browser);
 
-    let dt = event.dataTransfer;
+    let browser;
+    let isSplitHeaderDrag = false;
+
+    const container = event.target.closest(".browserSidebarContainer[zen-split]");
+    if (container && event.offsetY < 20) {
+      // Split tab header drag case
+      const containerRect = container.getBoundingClientRect();
+      const clickX = event.clientX - containerRect.left;
+
+      // Only allow drag if click is NOT in right 20px (close button area)
+      if (clickX > containerRect.width - 22) {
+        return;
+      }
+
+      browser = container.querySelector('browser');
+      isSplitHeaderDrag = true;
+    } else {
+      // Regular browser drag case
+      browser = event.target.querySelector('browser');
+    }
+
+    if (!browser) return;
+
+    const tab = gBrowser.getTabForBrowser(browser);
+    if (!tab) return;
+
+    // Store the necessary state for drag end
+    this._dragState = {
+      tab,
+      browser,
+      isSplitHeaderDrag
+    };
+
+    if (isSplitHeaderDrag) {
+      this.enableTabRearrangeView(true);
+    }
+
+    browser.style.opacity = '.2';
+    event.dataTransfer.setData('text/plain', browser.closest('.browserSidebarContainer').id);
+    this._draggingTab = tab;
+
+    // Canvas setup for drag image
     let scale = window.devicePixelRatio;
     let canvas = this._dndCanvas;
     if (!canvas) {
@@ -295,8 +336,8 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
       // On Windows and Mac we can update the drag image during a drag
       // using updateDragImage. On Linux, we can use a panel.
       if (platform === 'win' || platform === 'macosx') {
-        captureListener = function () {
-          dt.updateDragImage(canvas, dragImageOffset, dragImageOffset);
+        captureListener = () => {
+          event.dataTransfer.updateDragImage(canvas, dragImageOffset, dragImageOffset);
         };
       } else {
         // Create a panel to use it in setDragImage
@@ -327,7 +368,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
       PageThumbs.captureToCanvas(browser, canvas).catch((e) => console.error(e));
       dragImageOffset = dragImageOffset * scale;
     }
-    dt.setDragImage(toDrag, dragImageOffset, dragImageOffset);
+    event.dataTransfer.setDragImage(toDrag, dragImageOffset, dragImageOffset);
     return true;
   };
 
@@ -365,10 +406,28 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
   };
 
   onBrowserDragEnd = (event) => {
-    this.dropZone.removeAttribute('enabled');
-    const draggingBrowser = this._draggingTab.linkedBrowser;
-    draggingBrowser.style.opacity = '.85';
+    this.dropZone?.removeAttribute('enabled');
+
+    // If we don't have drag state, just clean up what we can
+    if (!this._dragState) {
+      this._draggingTab = null;
+      return;
+    }
+
+    const { tab, browser, isSplitHeaderDrag } = this._dragState;
+
+    if (browser) {
+      browser.style.opacity = isSplitHeaderDrag ? '1' : '.85';
+    }
+
+    // Handle split view specific cleanup
+    if (isSplitHeaderDrag) {
+      this.disableTabRearrangeView(event);
+    }
+
+    // Clear state
     this._draggingTab = null;
+    this._dragState = null;
   };
 
   _oppositeSide(side) {
@@ -479,6 +538,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     tab.splitView = false;
     tab.linkedBrowser.zenModeActive = false;
     const container = tab.linkedBrowser.closest('.browserSidebarContainer');
+    this._removeHeader(container);
     this.resetContainerStyle(container);
     container.removeEventListener('click', this.handleTabEvent);
     container.removeEventListener('mouseover', this.handleTabEvent);
@@ -771,8 +831,39 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     tabs.forEach((tab, index) => {
       tab.splitView = true;
       const container = tab.linkedBrowser.closest('.browserSidebarContainer');
+      // insert a header into the container
+      const header = this._createHeader(container);
+      container.insertBefore(header, container.firstChild);
       this.styleContainer(container);
     });
+  }
+
+  /**
+   * Creates a header for the tab.
+   * @param container
+   * @returns {*|!Element|HTMLElement|HTMLUnknownElement|HTMLDirectoryElement|HTMLFontElement|HTMLFrameElement|HTMLFrameSetElement|HTMLPreElement|HTMLMarqueeElement|HTMLParamElement}
+   * @private
+   */
+  _createHeader(container) {
+    const header = document.createElement('div');
+    header.classList.add('zen-view-splitter-header');
+    const dragHandle = document.createElement('div');
+    dragHandle.classList.add('zen-view-splitter-drag-handle');
+    header.appendChild(dragHandle);
+    const removeButton = document.createXULElement('toolbarbutton');
+    removeButton.classList.add('zen-tab-unsplit-button');
+    removeButton.addEventListener('click', () => {
+      this.removeTabFromSplit(container);
+    });
+    header.appendChild(removeButton);
+    return header;
+  }
+
+  _removeHeader(container) {
+    const header = container.querySelector('.zen-view-splitter-header');
+    if (header) {
+      header.remove();
+    }
   }
 
   /**
@@ -977,9 +1068,15 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
       const browser = tab.linkedBrowser.closest('.browserSidebarContainer');
       if (active) {
         browser.setAttribute('zen-split', 'true');
+
+        browser.addEventListener('dragstart', this.onBrowserDragStart);
+        browser.addEventListener('dragend', this.onBrowserDragEnd);
       } else {
         browser.removeAttribute('zen-split');
         browser.removeAttribute('style');
+
+        browser.removeEventListener('dragstart', this.onBrowserDragStart);
+        browser.removeEventListener('dragend', this.onBrowserDragEnd);
       }
     }
   }
@@ -1135,6 +1232,25 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
       ? gBrowser.selectedTabs
       : [gBrowser.selectedTab, tabs[nextTabIndex]];
     this.splitTabs(selected_tabs, gridType);
+  }
+
+  /**
+   * @description removes the tab from the split
+   * @param container - The container element
+   */
+  removeTabFromSplit = (container) => {
+    const browser = container.querySelector('browser');
+    if (browser) {
+      const tab = gBrowser.getTabForBrowser(browser);
+      if (tab) {
+        const groupIndex = this._data.findIndex(
+          group => group.tabs.includes(tab)
+        );
+        if (groupIndex >= 0) {
+          this.removeTabFromGroup(tab, groupIndex, true);
+        }
+      }
+    }
   }
 }
 

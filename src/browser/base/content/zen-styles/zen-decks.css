@@ -216,3 +216,54 @@
 #zenSplitViewModifier:not([has-enabled-realloc])[toast] #zenSplitViewModifierEnabledToast {
   display: revert;
 }
+
+.zen-view-splitter-header {
+  display: flex;
+  opacity: 0;
+  width: 100%;
+  height: 20px;
+  /*TODO: update with appropriate color*/
+  background-color: black;
+  position: absolute;
+  left: 0;
+  top: 0;
+  align-items: center;
+  z-index: 100;
+}
+
+.zen-view-splitter-header:hover {
+  opacity: 1;
+}
+
+.zen-view-splitter-drag-handle {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  cursor: move;
+}
+
+.zen-tab-unsplit-button {
+  display: block;
+  -moz-context-properties: fill, fill-opacity;
+  border-radius: var(--tab-border-radius);
+  /*TODO: update with appropriate color*/
+  color: inherit;
+  fill: currentColor;
+  padding: var(--tab-close-button-padding);
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  appearance: none;
+  outline: var(--toolbarbutton-outline);
+  list-style-image: url('chrome://global/skin/icons/close-fill.svg') !important;
+  &:hover {
+    outline-color: var(--toolbarbutton-hover-outline-color);
+  }
+
+  &:hover:active {
+    outline-color: var(--toolbarbutton-active-outline-color);
+  }
+}

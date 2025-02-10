@@ -1,5 +1,5 @@
 diff --git a/browser/components/tabbrowser/content/tabs.js b/browser/components/tabbrowser/content/tabs.js
-index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441bde7b604 100644
+index 8aeb244ffca9f48661805f5b7d860b5896055562..03f57b36ad71f804be079297443aa931d8887683 100644
 --- a/browser/components/tabbrowser/content/tabs.js
 +++ b/browser/components/tabbrowser/content/tabs.js
 @@ -94,7 +94,7 @@
@@ -91,7 +91,83 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
                  postTransitionCleanup();
                } else {
                  let onTransitionEnd = transitionendEvent => {
-@@ -1263,7 +1275,8 @@
+@@ -1260,10 +1272,84 @@
+       this._finishMoveTogetherSelectedTabs(draggedTab);
+       this._finishAnimateTabMove();
+ 
++      if (event.ctrlKey && !dt.mozUserCancelled && dt.dropEffect == "none" && !this._isCustomizing) {
++        const dropTarget = document.elementFromPoint(event.clientX, event.clientY);
++        const browser = dropTarget?.closest('browser');
++
++        if (browser) {
++          const droppedOnTab = gBrowser.getTabForBrowser(browser);
++          if (droppedOnTab && droppedOnTab !== draggedTab) {
++            // Calculate which side of the target browser the drop occurred
++            const browserRect = browser.getBoundingClientRect();
++            const hoverSide = gZenViewSplitter.calculateHoverSide(
++              event.clientX,
++              event.clientY,
++              browserRect
++            );
++
++            if (droppedOnTab.splitView) {
++              // Add to existing split view
++              const groupIndex = gZenViewSplitter._data.findIndex(
++                group => group.tabs.includes(droppedOnTab)
++              );
++              const group = gZenViewSplitter._data[groupIndex];
++
++              if (!group.tabs.includes(draggedTab)) {
++                const droppedOnSplitNode = gZenViewSplitter.getSplitNodeFromTab(droppedOnTab);
++                const parentNode = droppedOnSplitNode.parent;
++
++                // Add the tab to the split view
++                group.tabs.push(draggedTab);
++
++                // If dropping on a side, create a new split in that direction
++                if (hoverSide !== 'center') {
++                  const splitDirection = (hoverSide === 'left' || hoverSide === 'right') ? 'row' : 'column';
++                  if (parentNode.direction !== splitDirection) {
++                    gZenViewSplitter.splitIntoNode(droppedOnSplitNode, new SplitLeafNode(draggedTab, 50), hoverSide, 0.5);
++                  } else {
++                    gZenViewSplitter.addTabToSplit(draggedTab, parentNode);
++                  }
++                } else {
++                  gZenViewSplitter.addTabToSplit(draggedTab, group.layoutTree);
++                }
++
++                gZenViewSplitter.activateSplitView(group, true);
++              }
++            } else {
++              // Create new split view with layout based on drop position
++              let gridType;
++              switch (hoverSide) {
++                case 'left':
++                case 'right':
++                  gridType = 'vsep';
++                  break;
++                case 'top':
++                case 'bottom':
++                  gridType = 'hsep';
++                  break;
++                default:
++                  gridType = 'grid';
++              }
++
++              // Put tabs in correct order based on drop side
++              const tabs = ['left', 'top'].includes(hoverSide) ?
++                [draggedTab, droppedOnTab] :
++                [droppedOnTab, draggedTab];
++
++              gZenViewSplitter.splitTabs(tabs, gridType);
++            }
++          }
++        }
++
++        delete draggedTab._dragData;
++        return;
++      }
++
        if (
          dt.mozUserCancelled ||
          dt.dropEffect != "none" ||
@@ -101,7 +177,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
        ) {
          delete draggedTab._dragData;
          return;
-@@ -1512,9 +1525,19 @@
+@@ -1512,9 +1598,19 @@
        }
  
        this.#allTabs = [
@@ -122,7 +198,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
        return this.#allTabs;
      }
  
-@@ -1593,6 +1616,7 @@
+@@ -1593,6 +1689,7 @@
        }
  
        this.#focusableItems = [
@@ -130,7 +206,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
          ...verticalPinnedTabsContainer.children,
          ...focusableItems,
        ];
-@@ -1617,8 +1641,8 @@
+@@ -1617,8 +1714,8 @@
      #isContainerVerticalPinnedExpanded(tab) {
        return (
          this.verticalMode &&
@@ -141,7 +217,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
        );
      }
  
-@@ -1816,7 +1840,7 @@
+@@ -1816,7 +1913,7 @@
            let rect = ele => {
              return window.windowUtils.getBoundsWithoutFlushing(ele);
            };
@@ -150,7 +226,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
            if (tab && rect(tab).width <= this._tabClipWidth) {
              this.setAttribute("closebuttons", "activetab");
            } else {
-@@ -1832,6 +1856,7 @@
+@@ -1832,6 +1929,7 @@
          this.arrowScrollbox.ensureElementIsVisible(selectedTab, aInstant);
        }
  
@@ -158,7 +234,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
        selectedTab._notselectedsinceload = false;
      }
  
-@@ -1843,7 +1868,7 @@
+@@ -1843,7 +1941,7 @@
          return;
        }
  
@@ -167,7 +243,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
        if (!tabs.length) {
          return;
        }
-@@ -1879,7 +1904,7 @@
+@@ -1879,7 +1977,7 @@
          if (isEndTab && !this._hasTabTempMaxWidth) {
            return;
          }
@@ -176,7 +252,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
          // Force tabs to stay the same width, unless we're closing the last tab,
          // which case we need to let them expand just enough so that the overall
          // tabbar width is the same.
-@@ -1894,7 +1919,7 @@
+@@ -1894,7 +1992,7 @@
          let tabsToReset = [];
          for (let i = numPinned; i < tabs.length; i++) {
            let tab = tabs[i];
@@ -185,7 +261,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
            if (!isEndTab) {
              // keep tabs the same width
              tab.style.transition = "none";
-@@ -1965,11 +1990,11 @@
+@@ -1965,11 +2063,11 @@
        );
        let numPinned = gBrowser.pinnedTabCount;
  
@@ -200,7 +276,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
          }
        }
  
-@@ -1992,8 +2017,8 @@
+@@ -1992,8 +2090,8 @@
      }
  
      _positionPinnedTabs() {
@@ -211,7 +287,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
        let absPositionHorizontalTabs =
          this.overflowing && tabs.length > numPinned && numPinned > 0;
  
-@@ -2074,7 +2099,7 @@
+@@ -2074,7 +2172,7 @@
          return;
        }
  
@@ -220,7 +296,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
  
        let directionX = screenX > dragData.animLastScreenX;
        let directionY = screenY > dragData.animLastScreenY;
-@@ -2257,9 +2282,9 @@
+@@ -2257,9 +2355,9 @@
        }
  
        let pinned = draggedTab.pinned;
@@ -233,7 +309,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
          pinned ? numPinned : undefined
        );
  
-@@ -2502,8 +2527,9 @@
+@@ -2502,8 +2600,9 @@
        );
      }
  
@@ -245,7 +321,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
          return;
        }
  
-@@ -2668,9 +2694,9 @@
+@@ -2668,9 +2767,9 @@
        function newIndex(aTab, index) {
          // Don't allow mixing pinned and unpinned tabs.
          if (aTab.pinned) {
@@ -257,7 +333,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
        }
      }
  
-@@ -2754,7 +2780,7 @@
+@@ -2754,7 +2853,7 @@
      }
  
      _notifyBackgroundTab(aTab) {
@@ -266,7 +342,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
          return;
        }
  
-@@ -2772,12 +2798,14 @@
+@@ -2772,12 +2871,14 @@
                selectedTab = {
                  left: selectedTab.left,
                  right: selectedTab.right,
@@ -282,7 +358,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
                selectedTab,
              ];
            })
-@@ -2794,8 +2822,11 @@
+@@ -2794,8 +2895,11 @@
              delete this._lastTabToScrollIntoView;
              // Is the new tab already completely visible?
              if (
@@ -296,7 +372,7 @@ index 8aeb244ffca9f48661805f5b7d860b5896055562..bffa5e0be62e73f380adf558c5df3441
              ) {
                return;
              }
-@@ -2803,21 +2834,29 @@
+@@ -2803,21 +2907,29 @@
              if (this.arrowScrollbox.smoothScroll) {
                // Can we make both the new tab and the selected tab completely visible?
                if (
