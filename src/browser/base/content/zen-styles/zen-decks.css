@@ -220,6 +220,7 @@
 .zen-view-splitter-header {
   display: flex;
   opacity: 0;
+  transition: opacity 0.2s ease-out;
   width: 100%;
   height: 20px;
   /*TODO: update with appropriate color*/
