@@ -120,8 +120,18 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     group.tabs.splice(tabIndex, 1);
 
     this.resetTabState(tab, forUnsplit);
-
+    if (tab.group && tab.group.hasAttribute('split-view-group')) {
+      gBrowser.ungroupTab(tab);
+    }
     if (group.tabs.length < 2) {
+      // We need to remove all remaining tabs from the group when unsplitting
+      let remainingTabs = [...group.tabs]; // Copy array since we'll modify it
+      for (let remainingTab of remainingTabs) {
+        if (remainingTab.group && remainingTab.group.hasAttribute('split-view-group')) {
+          gBrowser.ungroupTab(remainingTab);
+        }
+        this.resetTabState(remainingTab, forUnsplit);
+      }
       this.removeGroup(groupIndex);
     } else {
       const node = this.getSplitNodeFromTab(tab);
@@ -537,6 +547,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
    */
   resetTabState(tab, forUnsplit) {
     tab.splitView = false;
+    tab.removeAttribute('split-view');
     tab.linkedBrowser.zenModeActive = false;
     const container = tab.linkedBrowser.closest('.browserSidebarContainer');
     this._removeHeader(container);
@@ -728,6 +739,16 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
     };
     this._data.push(splitData);
     window.gBrowser.selectedTab = tabs[0];
+
+    // Add tabs to the split view group
+    let splitGroup = this._getSplitViewGroup(tabs);
+    if (splitGroup) {
+      for (const tab of tabs) {
+        if (!tab.group || tab.group !== splitGroup) {
+          gBrowser.moveTabToGroup(tab, splitGroup);
+        }
+      }
+    }
     this.activateSplitView(splitData);
   }
 
@@ -831,6 +852,7 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
   applyGridToTabs(tabs) {
     tabs.forEach((tab, index) => {
       tab.splitView = true;
+      tab.setAttribute('split-view', 'true');
       const container = tab.linkedBrowser.closest('.browserSidebarContainer');
       if (!container.querySelector('.zen-view-splitter-header')) {
         // insert a header into the container
@@ -1280,10 +1302,16 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
         const group = this._data[groupIndex];
 
         if (!group.tabs.includes(draggedTab)) {
+          // First move the tab to the split view group
+          let splitGroup = droppedOnTab.group;
+          if (splitGroup && (!draggedTab.group || draggedTab.group !== splitGroup)) {
+            gBrowser.moveTabToGroup(draggedTab, splitGroup);
+          }
+
           const droppedOnSplitNode = this.getSplitNodeFromTab(droppedOnTab);
           const parentNode = droppedOnSplitNode.parent;
 
-          // Add the tab to the split view
+          // Then add the tab to the split view
           group.tabs.push(draggedTab);
 
           // If dropping on a side, create a new split in that direction
@@ -1323,6 +1351,40 @@ class ZenViewSplitter extends ZenDOMOperatedFeature {
       }
     }
     return true;
+  }
+
+  /**
+   * Gets or creates a tab group for split view tabs
+   * @param {Array} tabs Initial tabs to add to the group if creating new
+   * @returns {TabGroup} The tab group for split view tabs
+   */
+  _getSplitViewGroup(tabs) {
+    // if any of tabs is pinned, return null
+    if (tabs.some((tab) => tab.pinned)) {
+      return null;
+    }
+
+    // Try to find an existing split view group
+    let splitGroup = gBrowser.tabGroups.find(
+      (group) => group.getAttribute('split-view-group') && group.tabs.some((tab) => tabs.includes(tab) && tab.splitView)
+    );
+
+    if (splitGroup) {
+      return splitGroup;
+    }
+
+    // We can't create an empty group, so only create if we have tabs
+    if (tabs?.length) {
+      // Create a new group with the initial tabs
+      const group = gBrowser.addTabGroup(tabs, {
+        label: '',
+        showCreateUI: false,
+      });
+
+      group.setAttribute('split-view-group', true);
+    }
+
+    return null;
   }
 }
 

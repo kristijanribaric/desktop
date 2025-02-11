@@ -1,8 +1,13 @@
 diff --git a/browser/components/sessionstore/TabState.sys.mjs b/browser/components/sessionstore/TabState.sys.mjs
-index 8f7ed557e6aa61e7e16ed4a8d785ad5fe651b3d8..83bf443ca158c07e05075777da02b7f228d83dff 100644
+index 8f7ed557e6aa61e7e16ed4a8d785ad5fe651b3d8..8ccef91f3d9bf3657498249c00764f759ca3d754 100644
 --- a/browser/components/sessionstore/TabState.sys.mjs
 +++ b/browser/components/sessionstore/TabState.sys.mjs
-@@ -84,6 +84,13 @@ class _TabState {
+@@ -80,10 +80,17 @@ class _TabState {
+       tabData.muteReason = tab.muteReason;
+     }
+ 
+-    if (tab.group) {
++    if (tab.group && !tab.group.hasAttribute("split-view-group")) {
        tabData.groupId = tab.group.id;
      }
  
