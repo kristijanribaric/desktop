@@ -1390,15 +1390,11 @@ var ZenWorkspaces = new (class extends ZenMultiWindowFeature {
   _processTabVisibility(workspaceUuid, containerId, workspaces) {
     const visibleTabs = new Set();
     const lastSelectedTab = this._lastSelectedWorkspaceTabs[workspaceUuid];
-    const processedGroups = new Set();
 
     this.tabContainer.setAttribute('dont-animate-tabs', 'true');
-
-    // First pass: Process all tabs and track which ones should be visible
     for (const tab of gBrowser.tabs) {
       const tabWorkspaceId = tab.getAttribute('zen-workspace-id');
       const isEssential = tab.getAttribute('zen-essential') === 'true';
-      const group = tab.group;
 
       // Always hide last selected tabs from other workspaces
       if (lastSelectedTab === tab && tabWorkspaceId !== workspaceUuid && !isEssential) {
@@ -1416,28 +1412,6 @@ var ZenWorkspaces = new (class extends ZenMultiWindowFeature {
         }
       } else {
         gBrowser.hideTab(tab, undefined, true);
-      }
-
-      // Track the group if we haven't processed it yet
-      if (group && !processedGroups.has(group)) {
-        processedGroups.add(group);
-      }
-    }
-
-    // Second pass: Process tab groups visibility based on their tabs
-    for (const group of processedGroups) {
-      let hasVisibleTabs = false;
-      for (const tab of group.tabs) {
-        if (visibleTabs.has(tab)) {
-          hasVisibleTabs = true;
-          break;
-        }
-      }
-
-      if (hasVisibleTabs) {
-        gBrowser.showTabGroup(group);
-      } else {
-        gBrowser.hideTabGroup(group);
       }
     }
 
