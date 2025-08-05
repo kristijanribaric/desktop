@@ -109,7 +109,7 @@ var ZenPinnedTabsStorage = {
           `
           INSERT OR REPLACE INTO zen_pins (
             uuid, title, url, container_id, workspace_uuid, position,
-            is_essential, is_group, parent_uuid, edited_title, created_at, 
+            is_essential, is_group, parent_uuid, edited_title, created_at,
             updated_at
           ) VALUES (
             :uuid, :title, :url, :container_id, :workspace_uuid, :position,
@@ -197,6 +197,501 @@ var ZenPinnedTabsStorage = {
       parentUuid: row.getResultByName('parent_uuid'),
       editedTitle: Boolean(row.getResultByName('edited_title')),
     }));
+  },
+
+  /**
+   * Create a new group
+   * @param {string} title - The title of the group
+   * @param {string} workspaceUuid - The workspace UUID (optional)
+   * @param {string} parentUuid - The parent group UUID (optional, null for root level)
+   * @param {number} position - The position of the group (optional, will auto-calculate if not provided)
+   * @param {boolean} notifyObservers - Whether to notify observers (default: true)
+   * @returns {Promise<string>} The UUID of the created group
+   */
+  async createGroup(
+    title,
+    workspaceUuid = null,
+    parentUuid = null,
+    position = null,
+    notifyObservers = true
+  ) {
+    if (!title || typeof title !== 'string') {
+      throw new Error('Group title is required and must be a string');
+    }
+
+    const groupUuid = gZenUIManager.generateUuidv4();
+
+    const groupPin = {
+      uuid: groupUuid,
+      title,
+      workspaceUuid,
+      parentUuid,
+      position,
+      isGroup: true,
+      isEssential: false,
+      editedTitle: true, // Group titles are always considered edited
+    };
+
+    await this.savePin(groupPin, notifyObservers);
+    return groupUuid;
+  },
+
+  /**
+   * Add an existing tab/pin to a group
+   * @param {string} tabUuid - The UUID of the tab to add to the group
+   * @param {string} groupUuid - The UUID of the target group
+   * @param {number} position - The position within the group (optional, will append if not provided)
+   * @param {boolean} notifyObservers - Whether to notify observers (default: true)
+   */
+  async addTabToGroup(tabUuid, groupUuid, position = null, notifyObservers = true) {
+    if (!tabUuid || !groupUuid) {
+      throw new Error('Both tabUuid and groupUuid are required');
+    }
+
+    const changedUUIDs = new Set();
+
+    await PlacesUtils.withConnectionWrapper('ZenPinnedTabsStorage.addTabToGroup', async (db) => {
+      await db.executeTransaction(async () => {
+        // Verify the group exists and is actually a group
+        const groupCheck = await db.execute(
+          `SELECT is_group FROM zen_pins WHERE uuid = :groupUuid`,
+          { groupUuid }
+        );
+
+        if (groupCheck.length === 0) {
+          throw new Error(`Group with UUID ${groupUuid} does not exist`);
+        }
+
+        if (!groupCheck[0].getResultByName('is_group')) {
+          throw new Error(`Pin with UUID ${groupUuid} is not a group`);
+        }
+
+        // Verify the tab exists
+        const tabCheck = await db.execute(`SELECT uuid FROM zen_pins WHERE uuid = :tabUuid`, {
+          tabUuid,
+        });
+
+        if (tabCheck.length === 0) {
+          throw new Error(`Tab with UUID ${tabUuid} does not exist`);
+        }
+
+        const now = Date.now();
+        let newPosition;
+
+        if (position !== null && Number.isFinite(position)) {
+          newPosition = position;
+        } else {
+          // Get the maximum position within the group
+          const maxPositionResult = await db.execute(
+            `SELECT MAX("position") as max_position FROM zen_pins WHERE parent_uuid = :groupUuid`,
+            { groupUuid }
+          );
+          const maxPosition = maxPositionResult[0].getResultByName('max_position') || 0;
+          newPosition = maxPosition + 1000;
+        }
+
+        // Update the tab to be in the group
+        await db.execute(
+          `
+          UPDATE zen_pins
+          SET parent_uuid = :groupUuid,
+              position = :newPosition,
+              updated_at = :now
+          WHERE uuid = :tabUuid
+          `,
+          {
+            tabUuid,
+            groupUuid,
+            newPosition,
+            now,
+          }
+        );
+
+        changedUUIDs.add(tabUuid);
+
+        // Record the change
+        await db.execute(
+          `
+          INSERT OR REPLACE INTO zen_pins_changes (uuid, timestamp)
+          VALUES (:uuid, :timestamp)
+          `,
+          {
+            uuid: tabUuid,
+            timestamp: Math.floor(now / 1000),
+          }
+        );
+
+        await this.updateLastChangeTimestamp(db);
+      });
+    });
+
+    if (notifyObservers) {
+      this._notifyPinsChanged('zen-pin-updated', Array.from(changedUUIDs));
+    }
+  },
+
+  /**
+   * Remove a tab from its group (move to root level)
+   * @param {string} tabUuid - The UUID of the tab to remove from its group
+   * @param {number} newPosition - The new position at root level (optional, will append if not provided)
+   * @param {boolean} notifyObservers - Whether to notify observers (default: true)
+   */
+  async removeTabFromGroup(tabUuid, newPosition = null, notifyObservers = true) {
+    if (!tabUuid) {
+      throw new Error('tabUuid is required');
+    }
+
+    const changedUUIDs = new Set();
+
+    await PlacesUtils.withConnectionWrapper(
+      'ZenPinnedTabsStorage.removeTabFromGroup',
+      async (db) => {
+        await db.executeTransaction(async () => {
+          // Verify the tab exists and is in a group
+          const tabCheck = await db.execute(
+            `SELECT parent_uuid FROM zen_pins WHERE uuid = :tabUuid`,
+            { tabUuid }
+          );
+
+          if (tabCheck.length === 0) {
+            throw new Error(`Tab with UUID ${tabUuid} does not exist`);
+          }
+
+          if (!tabCheck[0].getResultByName('parent_uuid')) {
+            throw new Error(`Tab with UUID ${tabUuid} is not in a group`);
+          }
+
+          const now = Date.now();
+          let finalPosition;
+
+          if (newPosition !== null && Number.isFinite(newPosition)) {
+            finalPosition = newPosition;
+          } else {
+            // Get the maximum position at root level (where parent_uuid is null)
+            const maxPositionResult = await db.execute(
+              `SELECT MAX("position") as max_position FROM zen_pins WHERE parent_uuid IS NULL`
+            );
+            const maxPosition = maxPositionResult[0].getResultByName('max_position') || 0;
+            finalPosition = maxPosition + 1000;
+          }
+
+          // Update the tab to be at root level
+          await db.execute(
+            `
+          UPDATE zen_pins
+          SET parent_uuid = NULL,
+              position = :newPosition,
+              updated_at = :now
+          WHERE uuid = :tabUuid
+          `,
+            {
+              tabUuid,
+              newPosition: finalPosition,
+              now,
+            }
+          );
+
+          changedUUIDs.add(tabUuid);
+
+          // Record the change
+          await db.execute(
+            `
+          INSERT OR REPLACE INTO zen_pins_changes (uuid, timestamp)
+          VALUES (:uuid, :timestamp)
+          `,
+            {
+              uuid: tabUuid,
+              timestamp: Math.floor(now / 1000),
+            }
+          );
+
+          await this.updateLastChangeTimestamp(db);
+        });
+      }
+    );
+
+    if (notifyObservers) {
+      this._notifyPinsChanged('zen-pin-updated', Array.from(changedUUIDs));
+    }
+  },
+
+  /**
+   * Move a tab from one group to another
+   * @param {string} tabUuid - The UUID of the tab to move
+   * @param {string} newGroupUuid - The UUID of the destination group (null for root level)
+   * @param {number} position - The position in the new group (optional, will append if not provided)
+   * @param {boolean} notifyObservers - Whether to notify observers (default: true)
+   */
+  async moveTabBetweenGroups(tabUuid, newGroupUuid, position = null, notifyObservers = true) {
+    if (!tabUuid) {
+      throw new Error('tabUuid is required');
+    }
+
+    const changedUUIDs = new Set();
+
+    await PlacesUtils.withConnectionWrapper(
+      'ZenPinnedTabsStorage.moveTabBetweenGroups',
+      async (db) => {
+        await db.executeTransaction(async () => {
+          // Verify the tab exists
+          const tabCheck = await db.execute(`SELECT uuid FROM zen_pins WHERE uuid = :tabUuid`, {
+            tabUuid,
+          });
+
+          if (tabCheck.length === 0) {
+            throw new Error(`Tab with UUID ${tabUuid} does not exist`);
+          }
+
+          // If moving to a group, verify the group exists and is actually a group
+          if (newGroupUuid) {
+            const groupCheck = await db.execute(
+              `SELECT is_group FROM zen_pins WHERE uuid = :groupUuid`,
+              { groupUuid: newGroupUuid }
+            );
+
+            if (groupCheck.length === 0) {
+              throw new Error(`Group with UUID ${newGroupUuid} does not exist`);
+            }
+
+            if (!groupCheck[0].getResultByName('is_group')) {
+              throw new Error(`Pin with UUID ${newGroupUuid} is not a group`);
+            }
+          }
+
+          const now = Date.now();
+          let newPosition;
+
+          if (position !== null && Number.isFinite(position)) {
+            newPosition = position;
+          } else {
+            // Get the maximum position within the target group (or root level if newGroupUuid is null)
+            const maxPositionResult = await db.execute(
+              `
+            SELECT MAX("position") as max_position
+            FROM zen_pins
+            WHERE COALESCE(parent_uuid, '') = COALESCE(:parent_uuid, '')
+            `,
+              { parent_uuid: newGroupUuid || null }
+            );
+            const maxPosition = maxPositionResult[0].getResultByName('max_position') || 0;
+            newPosition = maxPosition + 1000;
+          }
+
+          // Update the tab's parent and position
+          await db.execute(
+            `
+          UPDATE zen_pins
+          SET parent_uuid = :newGroupUuid,
+              position = :newPosition,
+              updated_at = :now
+          WHERE uuid = :tabUuid
+          `,
+            {
+              tabUuid,
+              newGroupUuid: newGroupUuid || null,
+              newPosition,
+              now,
+            }
+          );
+
+          changedUUIDs.add(tabUuid);
+
+          // Record the change
+          await db.execute(
+            `
+          INSERT OR REPLACE INTO zen_pins_changes (uuid, timestamp)
+          VALUES (:uuid, :timestamp)
+          `,
+            {
+              uuid: tabUuid,
+              timestamp: Math.floor(now / 1000),
+            }
+          );
+
+          await this.updateLastChangeTimestamp(db);
+        });
+      }
+    );
+
+    if (notifyObservers) {
+      this._notifyPinsChanged('zen-pin-updated', Array.from(changedUUIDs));
+    }
+  },
+
+  /**
+   * Get all groups, optionally filtered by workspace
+   * @param {string} workspaceUuid - Optional workspace UUID to filter by
+   * @returns {Promise<Array>} Array of group objects
+   */
+  async getAllGroups(workspaceUuid = null) {
+    const db = await PlacesUtils.promiseDBConnection();
+
+    let query = `
+      SELECT * FROM zen_pins
+      WHERE is_group = 1
+    `;
+    let params = {};
+
+    if (workspaceUuid) {
+      query += ` AND workspace_uuid = :workspaceUuid`;
+      params.workspaceUuid = workspaceUuid;
+    }
+
+    query += ` ORDER BY parent_uuid NULLS FIRST, position ASC`;
+
+    const rows = await db.executeCached(query, params);
+
+    return rows.map((row) => ({
+      uuid: row.getResultByName('uuid'),
+      title: row.getResultByName('title'),
+      url: row.getResultByName('url'),
+      containerTabId: row.getResultByName('container_id'),
+      workspaceUuid: row.getResultByName('workspace_uuid'),
+      position: row.getResultByName('position'),
+      isEssential: Boolean(row.getResultByName('is_essential')),
+      isGroup: Boolean(row.getResultByName('is_group')),
+      parentUuid: row.getResultByName('parent_uuid'),
+      editedTitle: Boolean(row.getResultByName('edited_title')),
+    }));
+  },
+
+  /**
+   * Get information about a specific group including child count
+   * @param {string} groupUuid - The UUID of the group
+   * @returns {Promise<Object|null>} Group object with additional metadata or null if not found
+   */
+  async getGroupInfo(groupUuid) {
+    if (!groupUuid) {
+      throw new Error('groupUuid is required');
+    }
+
+    const db = await PlacesUtils.promiseDBConnection();
+
+    // Get group details
+    const groupRows = await db.executeCached(
+      `
+      SELECT * FROM zen_pins
+      WHERE uuid = :groupUuid AND is_group = 1
+      `,
+      { groupUuid }
+    );
+
+    if (groupRows.length === 0) {
+      return null;
+    }
+
+    // Get child count
+    const childCountRows = await db.executeCached(
+      `
+      SELECT COUNT(*) as child_count
+      FROM zen_pins
+      WHERE parent_uuid = :groupUuid
+      `,
+      { groupUuid }
+    );
+
+    const group = groupRows[0];
+    const childCount = childCountRows[0].getResultByName('child_count');
+
+    return {
+      uuid: group.getResultByName('uuid'),
+      title: group.getResultByName('title'),
+      url: group.getResultByName('url'),
+      containerTabId: group.getResultByName('container_id'),
+      workspaceUuid: group.getResultByName('workspace_uuid'),
+      position: group.getResultByName('position'),
+      isEssential: Boolean(group.getResultByName('is_essential')),
+      isGroup: Boolean(group.getResultByName('is_group')),
+      parentUuid: group.getResultByName('parent_uuid'),
+      editedTitle: Boolean(group.getResultByName('edited_title')),
+      childCount,
+    };
+  },
+
+  /**
+   * Reorder tabs within a specific group
+   * @param {string} groupUuid - The UUID of the group (null for root level)
+   * @param {Array<Object>} orderedTabs - Array of tab objects with uuid and position
+   * @param {boolean} notifyObservers - Whether to notify observers (default: true)
+   */
+  async reorderTabsInGroup(groupUuid, orderedTabs, notifyObservers = true) {
+    if (!Array.isArray(orderedTabs)) {
+      throw new Error('orderedTabs must be an array');
+    }
+
+    const changedUUIDs = new Set();
+
+    await PlacesUtils.withConnectionWrapper(
+      'ZenPinnedTabsStorage.reorderTabsInGroup',
+      async (db) => {
+        await db.executeTransaction(async () => {
+          const now = Date.now();
+
+          for (let i = 0; i < orderedTabs.length; i++) {
+            const tab = orderedTabs[i];
+            if (!tab.uuid) {
+              throw new Error('Each tab must have a uuid property');
+            }
+
+            const newPosition = (i + 1) * 1000;
+
+            // Verify the tab belongs to the specified group
+            const tabCheck = await db.execute(
+              `
+            SELECT parent_uuid FROM zen_pins
+            WHERE uuid = :tabUuid
+            `,
+              { tabUuid: tab.uuid }
+            );
+
+            if (tabCheck.length === 0) {
+              throw new Error(`Tab with UUID ${tab.uuid} does not exist`);
+            }
+
+            const currentParent = tabCheck[0].getResultByName('parent_uuid');
+            const expectedParent = groupUuid || null;
+
+            if (currentParent !== expectedParent) {
+              throw new Error(`Tab ${tab.uuid} does not belong to the specified group`);
+            }
+
+            await db.execute(
+              `
+            UPDATE zen_pins
+            SET position = :newPosition,
+                updated_at = :now
+            WHERE uuid = :tabUuid
+            `,
+              {
+                tabUuid: tab.uuid,
+                newPosition,
+                now,
+              }
+            );
+
+            changedUUIDs.add(tab.uuid);
+
+            // Record the change
+            await db.execute(
+              `
+            INSERT OR REPLACE INTO zen_pins_changes (uuid, timestamp)
+            VALUES (:uuid, :timestamp)
+            `,
+              {
+                uuid: tab.uuid,
+                timestamp: Math.floor(now / 1000),
+              }
+            );
+          }
+
+          await this.updateLastChangeTimestamp(db);
+        });
+      }
+    );
+
+    if (notifyObservers && changedUUIDs.size > 0) {
+      this._notifyPinsChanged('zen-pin-updated', Array.from(changedUUIDs));
+    }
   },
 
   async removePin(uuid, notifyObservers = true) {
