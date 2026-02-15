@@ -20,7 +20,11 @@
       "brandShortName": "Zen",
       "brandFullName": "Zen Browser",
       "release": {
+<<<<<<< Updated upstream
         "displayVersion": "1.18.7b",
+=======
+        "displayVersion": "1.18.8b",
+>>>>>>> Stashed changes
         "github": {
           "repo": "zen-browser/desktop"
         },
