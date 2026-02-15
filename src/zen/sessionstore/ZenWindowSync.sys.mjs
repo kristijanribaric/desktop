@@ -245,8 +245,6 @@ class nsZenWindowSync {
       for (let tab of gZenWorkspaces.allStoredTabs) {
         if (!tab.id) {
           tab.id = this.#newTabSyncId;
-          // Don't call with await here to avoid blocking the loop.
-          this.#maybeFlushTabState(tab);
         }
         if (tab.pinned && !tab._zenPinnedInitialState) {
           await this.setPinnedTabState(tab);
@@ -473,9 +471,6 @@ class nsZenWindowSync {
     if (flags & SYNC_FLAG_MOVE && !aTargetItem.hasAttribute("zen-empty-tab")) {
       this.#maybeSyncAttributeChange(aOriginalItem, aTargetItem, "zen-workspace-id");
       this.#syncItemPosition(aOriginalItem, aTargetItem, aWindow);
-    }
-    if (gBrowser.isTab(aTargetItem)) {
-      this.#maybeFlushTabState(aTargetItem);
     }
   }
 
@@ -1151,7 +1146,6 @@ class nsZenWindowSync {
     if (duringPinning && tab?.splitView) {
       this.on_ZenSplitViewTabsSplit({ target: tab.group });
     }
-    this.#maybeFlushTabState(tab);
   }
 
   on_ZenTabIconChanged(aEvent) {
