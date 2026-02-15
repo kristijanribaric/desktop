@@ -595,12 +595,10 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
           tab = gBrowser.adoptTab(tab, {
             elementIndex: newIndex,
             selectTab: tab == draggedTab,
+            spaceId: workspaceId,
           });
           if (tab) {
             ++newIndex;
-          }
-          if (workspaceId) {
-            tab.setAttribute("zen-workspace-id", workspaceId);
           }
         }
         return tab;
