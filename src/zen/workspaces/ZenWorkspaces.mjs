@@ -523,7 +523,7 @@ class nsZenWorkspaces {
 
   _handleAppCommand(event) {
     // note: Dont use this._hoveringSidebar as it's not as reliable as checking for :hover
-    if (!this.workspaceEnabled || !this._hoveringSidebar) {
+    if (!this.workspaceEnabled || !gNavToolbox.matches(":hover")) {
       return;
     }
 
