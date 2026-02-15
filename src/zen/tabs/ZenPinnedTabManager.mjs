@@ -600,6 +600,9 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
           if (tab) {
             ++newIndex;
           }
+          if (workspaceId) {
+            tab.setAttribute("zen-workspace-id", workspaceId);
+          }
         }
         return tab;
       });
