@@ -941,14 +941,19 @@
         );
         if (event.target.classList.contains("zen-workspace-empty-space") || hoveringPeriphery) {
           let lastTab = gBrowser.tabs.at(-1);
-          dropElement =
-            (hoveringPeriphery && Services.prefs.getBoolPref("zen.view.show-newtab-button-top")
-              ? this._tabbrowserTabs.ariaFocusableItems.at(
-                  gBrowser._numVisiblePinTabsWithoutCollapsed
-                )
-              : this._tabbrowserTabs.ariaFocusableItems.at(-1)) || lastTab;
+          let pinnedTabsCount = gBrowser._numVisiblePinTabsWithoutCollapsed;
+
           // Only if there are no normal tabs to drop after
           showIndicatorUnderNewTabButton = lastTab.hasAttribute("zen-empty-tab");
+          let useLastPinnd =
+            (hoveringPeriphery ||
+              (showIndicatorUnderNewTabButton &&
+                !(pinnedTabsCount - gBrowser._numZenEssentials))) &&
+            Services.prefs.getBoolPref("zen.view.show-newtab-button-top");
+          dropElement =
+            (useLastPinnd
+              ? this._tabbrowserTabs.ariaFocusableItems.at(pinnedTabsCount)
+              : this._tabbrowserTabs.ariaFocusableItems.at(-1)) || lastTab;
         }
       }
       dropElement = elementToMove(dropElement);
