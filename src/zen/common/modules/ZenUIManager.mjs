@@ -573,10 +573,7 @@ window.gZenUIManager = {
     if (gURLBar.hasAttribute("breakout-extend")) {
       return aURL;
     }
-    if (
-      gZenVerticalTabsManager._hasSetSingleToolbar &&
-      this.urlbarShowDomainOnly
-    ) {
+    if (gZenVerticalTabsManager._hasSetSingleToolbar && this.urlbarShowDomainOnly) {
       let url = BrowserUIUtils.removeSingleTrailingSlashFromURL(aURL);
       return url.startsWith("https://") ? url.split("/")[2] : url;
     }
