@@ -570,10 +570,12 @@ window.gZenUIManager = {
   },
 
   urlbarTrim(aURL) {
+    if (gURLBar.hasAttribute("breakout-extend")) {
+      return aURL;
+    }
     if (
       gZenVerticalTabsManager._hasSetSingleToolbar &&
-      this.urlbarShowDomainOnly &&
-      !gURLBar.hasAttribute("breakout-extend")
+      this.urlbarShowDomainOnly
     ) {
       let url = BrowserUIUtils.removeSingleTrailingSlashFromURL(aURL);
       return url.startsWith("https://") ? url.split("/")[2] : url;
