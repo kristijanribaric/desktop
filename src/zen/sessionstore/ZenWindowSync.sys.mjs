@@ -815,13 +815,12 @@ class nsZenWindowSync {
         });
 
         let promise = this.#createPseudoImageForBrowser(otherBrowser, mySrc);
+
         await Promise.all([promiseToWait, promise]);
-        aOurTab.ownerGlobal.requestAnimationFrame(() => {
-          otherBrowser.setAttribute("zen-pseudo-hidden", "true");
-          ourBrowser.removeAttribute("zen-pseudo-hidden");
-          this.#maybeRemovePseudoImageForBrowser(ourBrowser);
-        });
         callback();
+        otherBrowser.setAttribute("zen-pseudo-hidden", "true");
+        ourBrowser.removeAttribute("zen-pseudo-hidden");
+        this.#maybeRemovePseudoImageForBrowser(ourBrowser);
       } else {
         ourBrowser.removeAttribute("zen-pseudo-hidden");
         this.#maybeRemovePseudoImageForBrowser(ourBrowser);
