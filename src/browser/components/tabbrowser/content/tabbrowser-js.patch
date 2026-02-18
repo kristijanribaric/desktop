@@ -1,5 +1,5 @@
 diff --git a/browser/components/tabbrowser/content/tabbrowser.js b/browser/components/tabbrowser/content/tabbrowser.js
-index 0eaca7a58e0026237b71b2ad515efe84d9e8c779..fda38c3f86bac694027eb3bb339047c6aac30cb9 100644
+index 0eaca7a58e0026237b71b2ad515efe84d9e8c779..41cbe295b29abd014cc0425972be45b54fc684d9 100644
 --- a/browser/components/tabbrowser/content/tabbrowser.js
 +++ b/browser/components/tabbrowser/content/tabbrowser.js
 @@ -398,6 +398,7 @@
@@ -438,7 +438,7 @@ index 0eaca7a58e0026237b71b2ad515efe84d9e8c779..fda38c3f86bac694027eb3bb339047c6
            this._fireTabOpen(tab, {});
 -        } else if (tabData.groupId) {
 +        }
-+        if (tabData.groupId) {
++        if (tabData.groupId && tabGroupWorkingData.get(tabData.groupId)) {
            let { groupId } = tabData;
            const tabGroup = tabGroupWorkingData.get(groupId);
            // if a tab refers to a tab group we don't know, skip any group
