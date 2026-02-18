@@ -715,7 +715,7 @@ class nsZenWindowSync {
         return;
       }
       lazy.TabStateCache.update(aOurTab.linkedBrowser.permanentKey, {
-        history: tabStateEntries,
+        history: Cu.cloneInto(tabStateEntries, {}),
       });
     };
     // Running `swapBrowsersAndCloseOther` doesn't expect us to use the tab after
@@ -815,17 +815,19 @@ class nsZenWindowSync {
         });
 
         let promise = this.#createPseudoImageForBrowser(otherBrowser, mySrc);
-
         await Promise.all([promiseToWait, promise]);
         callback();
-        otherBrowser.setAttribute("zen-pseudo-hidden", "true");
-        ourBrowser.removeAttribute("zen-pseudo-hidden");
-        this.#maybeRemovePseudoImageForBrowser(ourBrowser);
-      } else {
-        ourBrowser.removeAttribute("zen-pseudo-hidden");
-        this.#maybeRemovePseudoImageForBrowser(ourBrowser);
+        lazy.setTimeout(() => {
+          otherBrowser.setAttribute("zen-pseudo-hidden", "true");
+          ourBrowser.removeAttribute("zen-pseudo-hidden");
+          this.#maybeRemovePseudoImageForBrowser(ourBrowser);
+          ourBrowser.focus();
+          resolve();
+        });
+        return;
       }
-
+      ourBrowser.removeAttribute("zen-pseudo-hidden");
+      this.#maybeRemovePseudoImageForBrowser(ourBrowser);
       resolve();
     });
   }
