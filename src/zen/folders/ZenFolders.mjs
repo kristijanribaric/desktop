@@ -730,12 +730,12 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
   get #searchPopupOptions() {
     const isRightSide = gZenVerticalTabsManager._prefsRightSide;
     const position = isRightSide ? "start_before" : "start_before";
-    let size = Math.min(this.#popup.querySelector("#zen-folder-tabs-list").children.length, 6) + 1;
+    let size = Math.min(this.#popup.querySelector("#zen-folder-tabs-list").children.length, 6);
     size *= 48;
     return {
       position,
       x: -10,
-      y: -size / 4,
+      y: size / -2,
     };
   }
 
