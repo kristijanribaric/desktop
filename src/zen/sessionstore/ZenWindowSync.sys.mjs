@@ -47,6 +47,9 @@ const EVENTS = [
   "TabGroupRemoved",
   "TabGroupMoved",
 
+  "TabHide",
+  "TabShow",
+
   "ZenTabRemovedFromSplit",
   "ZenSplitViewTabsSplit",
 
@@ -1165,6 +1168,34 @@ class nsZenWindowSync {
       return;
     }
     return this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_LABEL);
+  }
+
+  on_TabHide(aEvent) {
+    const tab = aEvent.target;
+    const window = tab.ownerGlobal;
+    if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
+      return;
+    }
+    this.#runOnAllWindows(window, (win) => {
+      const targetTab = this.getItemFromWindow(win, tab.id);
+      if (targetTab) {
+        targetTab.ownerGlobal.gBrowser.hideTab(targetTab);
+      }
+    });
+  }
+
+  on_TabShow(aEvent) {
+    const tab = aEvent.target;
+    const window = tab.ownerGlobal;
+    if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
+      return;
+    }
+    this.#runOnAllWindows(window, (win) => {
+      const targetTab = this.getItemFromWindow(win, tab.id);
+      if (targetTab) {
+        targetTab.ownerGlobal.gBrowser.showTab(targetTab);
+      }
+    });
   }
 
   on_TabMove(aEvent) {
