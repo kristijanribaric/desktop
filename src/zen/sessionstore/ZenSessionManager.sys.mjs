@@ -177,7 +177,7 @@ export class nsZenSessionManager {
       } catch {
         /* ignore errors reading recovery data */
       }
-      if (!data.recoverYData) {
+      if (!data.recoveryData) {
         try {
           data.recoveryData = await IOUtils.readJSON(
             PathUtils.join(
@@ -223,6 +223,7 @@ export class nsZenSessionManager {
     } catch (e) {
       console.error("ZenSessionManager: Failed to read session file", e);
     }
+    console.log(this.#file.dataReady)
     this.#sidebar = this.#file.data || {};
     if (!this.#sidebar.spaces?.length && !this._shouldRunMigration) {
       this.log("No spaces data found in session file, running migration", this.#sidebar);
