@@ -42,6 +42,7 @@ const EVENTS = [
   "TabAddedToEssentials",
   "TabRemovedFromEssentials",
 
+  "TabUngrouped",
   "TabGroupUpdate",
   "TabGroupCreate",
   "TabGroupRemoved",
@@ -146,7 +147,7 @@ class nsZenWindowSync {
   /**
    * @returns {Window|null} The first opened browser window, or null if none exist.
    */
-  get #firstSyncedWindow() {
+  get firstSyncedWindow() {
     for (let window of this.#browserWindows) {
       return window;
     }
@@ -474,6 +475,27 @@ class nsZenWindowSync {
     if (flags & SYNC_FLAG_MOVE && !aTargetItem.hasAttribute("zen-empty-tab")) {
       this.#maybeSyncAttributeChange(aOriginalItem, aTargetItem, "zen-workspace-id");
       this.#syncItemPosition(aOriginalItem, aTargetItem, aWindow);
+    }
+    if (aOriginalItem.hasAttribute("zen-live-folder-item-id")) {
+      this.#maybeSyncAttributeChange(aOriginalItem, aTargetItem, "zen-live-folder-item-id");
+      this.#maybeSyncAttributeChange(aOriginalItem, aTargetItem, "zen-show-sublabel");
+      this.#syncTabSubtitle(aWindow, aOriginalItem, aTargetItem);
+    } else if (aTargetItem.hasAttribute("zen-live-folder-item-id")) {
+      aTargetItem.removeAttribute("zen-live-folder-item-id");
+      if (aTargetItem.hasAttribute("zen-show-sublabel")) {
+        this.#syncTabSubtitle(aWindow, aOriginalItem, aTargetItem);
+        aTargetItem.removeAttribute("zen-show-sublabel");
+      }
+    }
+  }
+
+  #syncTabSubtitle(aWindow, aOriginalItem, aTargetItem) {
+    const subLabel = aOriginalItem.getAttribute("zen-show-sublabel");
+    const targetLabel = aTargetItem.querySelector(".zen-tab-sublabel");
+    if (targetLabel) {
+      aWindow.document.l10n.setArgs(targetLabel, {
+        tabSubtitle: subLabel || "zen-default-pinned",
+      });
     }
   }
 
@@ -1041,7 +1063,7 @@ class nsZenWindowSync {
       (tab) => !tab.hasAttribute("zen-empty-tab")
     );
     const selectedTab = aWindow.gBrowser.selectedTab;
-    let win = this.#firstSyncedWindow;
+    let win = this.firstSyncedWindow;
     const moveAllTabsToWindow = async (allowSelected = false) => {
       const { gBrowser, gZenWorkspaces } = win;
       win.focus();
@@ -1367,6 +1389,14 @@ class nsZenWindowSync {
 
   on_TabGroupUpdate(aEvent) {
     return this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_ICON | SYNC_FLAG_LABEL);
+  }
+
+  on_TabUngrouped() {
+    // No need to sync anything when a tab is ungrouped, since on_TabMove will take
+    // care of moving the tab to the correct position. We still need to listen to this
+    // in order to throw sync events for other components such as live folders to
+    // update their state, but we don't need to do anything here.
+    return Promise.resolve();
   }
 
   on_ZenTabRemovedFromSplit(aEvent) {
