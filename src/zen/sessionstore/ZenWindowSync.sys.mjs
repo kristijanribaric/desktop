@@ -734,7 +734,11 @@ class nsZenWindowSync {
         // We do need to do this though instead of just unloading the browser because
         // firefox doesn't expect an unloaded + selected tab, so we need to get
         // around this limitation somehow.
-        if (!onClose) {
+        if (
+          !onClose &&
+          (aOtherTab.linkedBrowser?.currentURI.spec !== "about:blank" ||
+            aOtherTab.hasAttribute("busy"))
+        ) {
           this.log(`Loading about:blank in our tab ${aOtherTab.id} before swap`);
           aOtherTab.linkedBrowser.loadURI(Services.io.newURI("about:blank"), {
             triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
