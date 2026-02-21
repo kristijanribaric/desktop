@@ -111,8 +111,8 @@ zen-folder {
         & image {
           fill-opacity: 0.9;
           -moz-context-properties: fill, fill-opacity;
-          fill: var(--zen-folder-stroke);
-          transform: translate(9px, 11px);
+          fill: color-mix(in srgb, var(--zen-folder-stroke) 50%, currentColor);
+          transform: translate(8.5px, 10.5px);
         }
 
         & g,
