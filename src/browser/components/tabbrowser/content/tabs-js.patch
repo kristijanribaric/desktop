@@ -1,5 +1,5 @@
 diff --git a/browser/components/tabbrowser/content/tabs.js b/browser/components/tabbrowser/content/tabs.js
-index 2760f6700056e2ae9b6a6fdad006c5b679a97233..9661404c030e6815ded926a6d91d4f24f4139f9e 100644
+index 2760f6700056e2ae9b6a6fdad006c5b679a97233..0b9454f0bb8dc796d54a69e33c05b0d5590b6286 100644
 --- a/browser/components/tabbrowser/content/tabs.js
 +++ b/browser/components/tabbrowser/content/tabs.js
 @@ -244,7 +244,7 @@
@@ -192,7 +192,7 @@ index 2760f6700056e2ae9b6a6fdad006c5b679a97233..9661404c030e6815ded926a6d91d4f24
        return (
 -        tab.pinned &&
 +        tab.hasAttribute("zen-essential") &&
-+        (this._tabbrowserTabs.hasAttribute("expanded") || document.documentElement.hasAttribute("zen-sidebar-expanded")) &&
++        (this.hasAttribute("expanded") || document.documentElement.hasAttribute("zen-sidebar-expanded")) &&
          this.verticalMode &&
          this.hasAttribute("expanded") &&
          !this.expandOnHover
