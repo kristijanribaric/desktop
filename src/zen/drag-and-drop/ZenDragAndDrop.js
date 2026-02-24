@@ -719,12 +719,7 @@
       const edgeZoneThreshold = this._dndSplitThreshold / 100;
 
       const overlapRatioY = (clientY - targetTop) / targetHeight;
-      const overlapRatioX = (clientX - targetX) / targetWidth;
-      if (
-        (overlapRatioX > edgeZoneThreshold && overlapRatioX < 1 - edgeZoneThreshold) ||
-        overlapRatioY < edgeZoneThreshold ||
-        overlapRatioY > 1 - edgeZoneThreshold
-      ) {
+      if (overlapRatioY < edgeZoneThreshold || overlapRatioY > 1 - edgeZoneThreshold) {
         this._clearDragOverSplit();
         return;
       }
@@ -861,11 +856,6 @@
       this._clearDragOverSplit();
     }
 
-    handle_dragleave(event) {
-      super.handle_dragleave(event);
-      this._clearDragOverSplit();
-    }
-
     #handle_dropSwitchSpace(event) {
       const dt = event.dataTransfer;
       const activeWorkspace = gZenWorkspaces.activeWorkspace;
@@ -899,6 +889,7 @@
         return;
       }
 
+      this._dontAnimateTabMove = true;
       const droppedOnTab = dragData.dropElement;
       const dropSide = dragData.dropSide;
 
@@ -947,11 +938,19 @@
         const animateElement = (ele, translateY) => {
           ele.style.transform = `translateY(${translateY}px)`;
           let animateInternal = (resolve) => {
+            const clearStyles = () => {
+              ele.style.transform = "";
+              ele.style.zIndex = "";
+            };
+            if (this._dontAnimateTabMove) {
+              clearStyles();
+              resolve();
+              return;
+            }
             gZenUIManager
               .elementAnimate(ele, { y: [translateY, 0] }, { duration: 100, easing: "ease-out" })
               .then(() => {
-                ele.style.transform = "";
-                ele.style.zIndex = "";
+                clearStyles();
               })
               .finally(resolve);
           };
@@ -1022,6 +1021,7 @@
       }
       Promise.all(animations).finally(() => {
         this.#isAnimatingTabMove = false;
+        delete this._dontAnimateTabMove;
       });
     }
 

@@ -249,7 +249,7 @@
 }
 
 zen-split-fake-tab {
-  border-radius: var(--tab-border-radius);
+  border-radius: var(--border-radius-medium);
   background-color: color-mix(in srgb, var(--button-background-color-primary), transparent 40%);
   margin: var(--tab-block-margin);
   flex: 1;
