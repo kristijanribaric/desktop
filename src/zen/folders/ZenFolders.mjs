@@ -903,15 +903,15 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
       return;
     }
 
-    gZenEmojiPicker
-      .open(group.icon, { onlySvgIcons: true })
-      .then((icon) => {
+    gZenEmojiPicker.open(group.icon, {
+      onlySvgIcons: true,
+      allowNone: Boolean(group.iconURL),
+      closeOnSelect: false,
+      onSelect: (icon) => {
         this.setFolderUserIcon(group, icon);
         group.dispatchEvent(new CustomEvent("TabGroupUpdate", { bubbles: true }));
-      })
-      .catch((err) => {
-        console.error(err);
-      });
+      },
+    });
   }
 
   setFolderUserIcon(group, icon) {
