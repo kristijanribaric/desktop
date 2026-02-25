@@ -34,6 +34,7 @@ class nsZenLiveFoldersManager {
   #saveFilename = "zen-live-folders.jsonlz4";
   #file = null;
 
+  stateRestored = Promise.withResolvers();
   constructor() {
     this.liveFolders = new Map();
     this.registry = new Map();
@@ -271,7 +272,7 @@ class nsZenLiveFoldersManager {
             id: "ZEN_LIVE_FOLDERS_CALLOUT",
             anchors: [
               {
-                selector: `[id="${folder.id}"]`,
+                selector: `[id="${folder.id}"] > .tab-group-label-container`,
                 panel_position: {
                   anchor_attachment: "rightcenter",
                   callout_attachment: "topleft",
@@ -530,7 +531,6 @@ class nsZenLiveFoldersManager {
         tabsState.push({
           itemId,
           label: tab.getAttribute("zen-show-sublabel"),
-          icon: tab.iconImage.src,
         });
       }
 
@@ -578,8 +578,7 @@ class nsZenLiveFoldersManager {
 
       this.liveFolders.set(entry.id, liveFolder);
       this.folderRefs.set(liveFolder, folder);
-
-      liveFolder.tabsState = entry.tabsState;
+      liveFolder.tabsState = entry.tabsState || [];
       liveFolder.state.lastErrorId = entry.data.state.lastErrorId;
       if (entry.dismissedItems && Array.isArray(entry.dismissedItems)) {
         entry.dismissedItems.forEach((id) => this.dismissedItems.add(id));
@@ -587,6 +586,8 @@ class nsZenLiveFoldersManager {
 
       liveFolder.start();
     }
+
+    this.stateRestored.resolve();
   }
 }
 
