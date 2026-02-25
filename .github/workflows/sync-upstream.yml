@@ -50,8 +50,8 @@ jobs:
       - name: Install dependencies
         if: steps.check-upstream-branch.outputs.branch_exists == 'false'
         run: |
-          git config --global user.email "mr-cheffy@users.noreply.github.com"
-          git config --global user.name "mr-cheffy"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Setup surfer CI
         if: steps.check-upstream-branch.outputs.branch_exists == 'false'
