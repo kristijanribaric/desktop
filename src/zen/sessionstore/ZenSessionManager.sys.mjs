@@ -514,6 +514,16 @@ export class nsZenSessionManager {
        * we want to save the session even if we fail to create it */
     });
     this.#collectWindowData(windows);
+    // Detect relevant workspace changes and notify the sync engine.
+    const _relevantHash = JSON.stringify({
+      s: this.#sidebar.spaces,
+      t: (this.#sidebar.tabs || []).filter(t => t.pinned),
+      f: this.#sidebar.folders,
+    });
+    if (_relevantHash !== this._lastZenWorkspaceHash) {
+      this._lastZenWorkspaceHash = _relevantHash;
+      Services.obs.notifyObservers(null, "zen-workspace-state-changed");
+    }
     // This would save the data to disk asynchronously or when quitting the app.
     let sidebar = this.#sidebar;
     this.#file.data = sidebar;
@@ -800,6 +810,36 @@ export class nsZenSessionManager {
       return [];
     }
     return Cu.cloneInto(sidebar.spaces, {});
+  }
+
+  /**
+   * Returns a deep clone of the full sidebar object (spaces, tabs, folders, etc.).
+   * Used by the ZenWorkspacesSync engine to build the sync payload.
+   *
+   * @returns {object} A deep clone of the sidebar data.
+   */
+  getSidebarData() {
+    const sidebar = this.#sidebar;
+    if (!sidebar) return {};
+    return JSON.parse(JSON.stringify(sidebar));
+  }
+
+  /**
+   * Applies sync data received from another device into the sidebar object
+   * and persists it to disk. Pinned tab changes take effect on next startup.
+   *
+   * @param {object} newData - Object with optional `spaces`, `tabs`, `folders` arrays.
+   */
+  applySyncData(newData) {
+    if (!newData) return;
+    this.#sidebar = {
+      ...this.#sidebar,
+      spaces: newData.spaces ?? this.#sidebar.spaces,
+      tabs: newData.tabs ?? this.#sidebar.tabs,
+      folders: newData.folders ?? this.#sidebar.folders,
+    };
+    this.#file.data = this.#sidebar;
+    this.#file.saveSoon();
   }
 }
 
