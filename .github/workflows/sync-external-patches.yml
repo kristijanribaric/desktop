@@ -19,7 +19,12 @@ jobs:
         uses: actions/setup-python@v5
         # note: This will use the version defined in '.python-version' by defaultç
 
-      - name: Install dependencies
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Setup git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -35,6 +40,10 @@ jobs:
           else
             echo "files_changed=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Install dependencies
+        if: steps.git-check.outputs.files_changed == 'true'
+        run: npm ci
 
       - name: Download Firefox and dependencies
         if: steps.git-check.outputs.files_changed == 'true'
