@@ -111,7 +111,7 @@ jobs:
 
       - name: Import external patches
         if: steps.git-check.outputs.files_changed == 'true'
-        run: python3 scripts/import_external_patches.py || true
+        run: python3 scripts/update_external_patches.py || true
 
       - name: Run formatter
         if: steps.check-upstream-branch.outputs.branch_exists == 'false'
