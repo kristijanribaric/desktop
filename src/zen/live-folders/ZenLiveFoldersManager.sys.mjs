@@ -250,6 +250,7 @@ class nsZenLiveFoldersManager {
     Services.prefs.setBoolPref("zen.live-folders.promotion.shown", true);
     let window = this.window;
     let gBrowser = window.gBrowser;
+    let isRightSide = window.gZenVerticalTabsManager._prefsRightSide;
     const callout = new lazy.FeatureCallout({
       win: this.window,
       location: "chrome",
@@ -275,7 +276,7 @@ class nsZenLiveFoldersManager {
                 selector: `[id="${folder.id}"] > .tab-group-label-container`,
                 panel_position: {
                   anchor_attachment: "rightcenter",
-                  callout_attachment: "topleft",
+                  callout_attachment: isRightSide ? "topright" : "topleft",
                 },
               },
             ],
