@@ -1263,7 +1263,7 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
         if (group.tabs.length >= this.MAX_TABS) {
           return;
         }
-        if (gridTypeChange || !newTabsAdded) {
+        if (gridTypeChange && !newTabsAdded) {
           // reset layout
           group.gridType = gridType;
           group.layoutTree = this.calculateLayoutTree(
