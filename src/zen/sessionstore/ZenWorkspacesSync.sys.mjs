@@ -11,7 +11,6 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
-  ZenWindowSync: "resource:///modules/zen/ZenWindowSync.sys.mjs",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
@@ -36,7 +35,6 @@ ZenWorkspacesRecord.prototype.type = "workspaces";
 class ZenWorkspacesStore extends Store {
   constructor(name, engine) {
     super(name, engine);
-    this._log.info("ZenWorkspacesStore initialized");
   }
 
   async getAllIDs() {
@@ -53,84 +51,33 @@ class ZenWorkspacesStore extends Store {
       record.deleted = true;
       return record;
     }
-    let sidebarData = lazy.ZenSessionStore.getSidebarData();
-    record.cleartext = await this._buildPayload(sidebarData);
-    return record;
-  }
 
-  async _buildPayload(sidebarData) {
-    let allIdentities = lazy.ContextualIdentityService.getPublicIdentities();
-    let containerIdToName = new Map();
-    for (let identity of allIdentities) {
-      containerIdToName.set(identity.userContextId, identity.name);
-    }
+    let sidebar = lazy.ZenSessionStore.getSidebarData();
 
-    // Map spaces - convert containerTabId to containerName
-    let spaces = (sidebarData.spaces || []).map(space => ({
-      uuid: space.uuid,
-      name: space.name,
-      icon: space.icon,
-      theme: space.theme,
-      containerName: containerIdToName.get(space.containerTabId) ?? null,
-      position: space.position,
+    // Only sync spaces, pinned/essential tabs, folders, and containers.
+    // Regular browsing tabs are device-local and are never synced (for now)
+    let spaces = sidebar.spaces || [];
+    let pinnedTabs = (sidebar.tabs || []).filter(tab => tab.pinned);
+    let folders = sidebar.folders || [];
+
+    let groups = sidebar.groups || [];
+
+    let containers = lazy.ContextualIdentityService.getPublicIdentities().map(c => ({
+      userContextId: c.userContextId,
+      name: c.name,
+      icon: c.icon,
+      color: c.color,
     }));
 
-    // Filter pinned tabs (exclude empty tabs)
-    let pinnedTabs = (sidebarData.tabs || []).filter(
-      tab => tab.pinned && !tab.zenIsEmpty
-    );
-
-    let pins = pinnedTabs.map(tab => ({
-      uuid: tab.zenSyncId,
-      title: tab.entries?.[tab.index - 1]?.title ?? tab.entries?.[0]?.title ?? "",
-      url: tab.entries?.[tab.index - 1]?.url ?? tab.entries?.[0]?.url ?? "",
-      icon: tab.image ?? null,
-      isEssential: tab.zenEssential ?? false,
-      workspaceUuid: tab.zenWorkspace ?? null,
-      containerName: containerIdToName.get(tab.userContextId) ?? null,
-      position: tab.position ?? 0,
-      editedTitle: tab.zenStaticLabel ?? null,
-      staticLabel: tab.zenStaticLabel ?? null,
-      staticIcon: tab.zenHasStaticIcon ? (tab.image ?? null) : null,
-    }));
-
-    // Filter out live folders
-    let folders = (sidebarData.folders || [])
-      .filter(folder => !folder.isLiveFolder)
-      .map(folder => ({
-        uuid: folder.uuid,
-        label: folder.label,
-        icon: folder.icon ?? null,
-        isCollapsed: folder.isCollapsed ?? false,
-        pinned: folder.pinned ?? false,
-        position: folder.position ?? 0,
-      }));
-
-    // Build container list (unique containers referenced)
-    let containerNamesSet = new Set();
-    for (let space of spaces) {
-      if (space.containerName) containerNamesSet.add(space.containerName);
-    }
-    for (let pin of pins) {
-      if (pin.containerName) containerNamesSet.add(pin.containerName);
-    }
-    let containers = allIdentities
-      .filter(id => containerNamesSet.has(id.name))
-      .map(id => ({
-        name: id.name,
-        icon: id.icon,
-        color: id.color,
-      }));
-
-    return {
+    record.cleartext = {
       id: lazy.ZEN_WORKSPACES_GUID,
-      version: 1,
       spaces,
-      pins,
+      pinnedTabs,
       folders,
+      groups,
       containers,
-      lastModified: Date.now(),
     };
+    return record;
   }
 
   async create(record) {
@@ -146,121 +93,55 @@ class ZenWorkspacesStore extends Store {
       return;
     }
 
-    // Step 1: Ensure containers exist, build name→id map
-    let containerNameToId = await this._ensureContainers(data.containers || []);
+    // Sync containers immediately - they must exist before the next startup
+    // so that pinned tabs with a userContextId open in the right container, also cuz workspaces depend on them.
+    await this._syncContainers(data.containers || []);
 
-    // Step 2: Remap spaces containerName → containerTabId
-    let spaces = (data.spaces || []).map(space => ({
-      uuid: space.uuid,
-      name: space.name,
-      icon: space.icon,
-      theme: space.theme,
-      containerTabId: containerNameToId.get(space.containerName) ?? 0,
-      position: space.position,
-    }));
-
-    // Step 3: Merge pinned tabs
-    let currentSidebar = lazy.ZenSessionStore.getSidebarData();
-    let currentTabs = currentSidebar.tabs || [];
-
-    // Build a map of existing tabs by zenSyncId
-    let existingTabMap = new Map();
-    for (let tab of currentTabs) {
-      if (tab.zenSyncId) {
-        existingTabMap.set(tab.zenSyncId, tab);
-      }
-    }
-
-    // Build the set of incoming pin UUIDs
-    let incomingPinUuids = new Set((data.pins || []).map(pin => pin.uuid));
-
-    // Keep unpinned tabs as-is; update or add pinned tabs
-    let unpinnedTabs = currentTabs.filter(tab => !tab.pinned);
-
-    let mergedPinnedTabs = (data.pins || []).map(pin => {
-      let existing = existingTabMap.get(pin.uuid);
-      if (existing) {
-        // Update existing tab
-        return {
-          ...existing,
-          zenEssential: pin.isEssential,
-          zenWorkspace: pin.workspaceUuid,
-          userContextId: containerNameToId.get(pin.containerName) ?? (existing.userContextId ?? 0),
-          image: pin.icon ?? existing.image,
-          zenHasStaticIcon: pin.staticIcon != null,
-          zenStaticLabel: pin.staticLabel ?? undefined,
-          position: pin.position,
-        };
-      }
-      // New tab from remote
-      let newTab = {
-        zenSyncId: pin.uuid,
-        pinned: true,
-        zenEssential: pin.isEssential ?? false,
-        zenWorkspace: pin.workspaceUuid ?? null,
-        entries: [{ url: pin.url, title: pin.title }],
-        index: 1,
-        image: pin.icon ?? null,
-        zenHasStaticIcon: pin.staticIcon != null,
-        userContextId: containerNameToId.get(pin.containerName) ?? 0,
-        zenStaticLabel: pin.staticLabel ?? undefined,
-        position: pin.position ?? 0,
-      };
-      return newTab;
+    // Apply workspaces/tabs/folders/groups immediately.
+    await lazy.ZenSessionStore.applySyncData({
+      spaces: data.spaces || [],
+      pinnedTabs: data.pinnedTabs || [],
+      folders: data.folders || [],
+      groups: data.groups || [],
     });
-
-    // Drop pinned tabs that are no longer in the incoming data
-    let tabs = [...mergedPinnedTabs, ...unpinnedTabs];
-
-    // Step 4: Folders (already filtered on the sender side, no live folders)
-    let folders = (data.folders || []).map(folder => ({
-      uuid: folder.uuid,
-      label: folder.label,
-      icon: folder.icon ?? null,
-      isCollapsed: folder.isCollapsed ?? false,
-      pinned: folder.pinned ?? false,
-      position: folder.position ?? 0,
-    }));
-
-    // Step 5: Write to session store
-    lazy.ZenSessionStore.applySyncData({ spaces, tabs, folders });
-
-    // Step 6: Propagate workspace changes to open windows for immediate UI update
-    try {
-      lazy.ZenWindowSync.propagateWorkspacesToAllWindows(spaces);
-    } catch (e) {
-      this._log.warn("Failed to propagate workspaces to windows", e);
-    }
   }
 
-  async _ensureContainers(containers) {
-    let allIdentities = lazy.ContextualIdentityService.getPublicIdentities();
-    let existingByName = new Map();
-    for (let identity of allIdentities) {
-      existingByName.set(identity.name, identity.userContextId);
-    }
+  /**
+   * Ensures every incoming container exists locally with the same userContextId.
+   * Creates missing ones (with explicit ID so both devices share the same numeric
+   * value) and updates existing ones. Never removes containers.
+   *
+   * @param {Array<{userContextId, name, icon, color}>} incoming
+   */
+  async _syncContainers(incoming) {
+    try {
+      let local = lazy.ContextualIdentityService.getPublicIdentities();
+      let localById = new Map(local.map(c => [c.userContextId, c]));
 
-    let nameToId = new Map();
-    for (let container of containers) {
-      if (!container.name) continue;
-      if (existingByName.has(container.name)) {
-        nameToId.set(container.name, existingByName.get(container.name));
-      } else {
-        // Create missing container
-        try {
-          let newIdentity = lazy.ContextualIdentityService.create(
+      for (let container of incoming) {
+        if (!container.name) {
+          continue;
+        }
+        if (localById.has(container.userContextId)) {
+          lazy.ContextualIdentityService.update(
+            container.userContextId,
             container.name,
-            container.icon || "circle",
-            container.color || "blue"
+            container.icon,
+            container.color
           );
-          nameToId.set(container.name, newIdentity.userContextId);
-          this._log.info("Created missing container:", container.name);
-        } catch (e) {
-          this._log.warn("Failed to create container:", container.name, e);
+        } else {
+          // Pass explicit ID so both devices share the same numeric userContextId. Made possible my patching the create method on ContextualIdentityService to accept an explicit ID. ( Fuck incremental ID generation!)
+          lazy.ContextualIdentityService.create(
+            container.name,
+            container.icon,
+            container.color,
+            container.userContextId
+          );
         }
       }
+    } catch (e) {
+      console.error("ZenWorkspacesSync: Error syncing containers:", e);
     }
-    return nameToId;
   }
 
   async remove() {
@@ -269,10 +150,11 @@ class ZenWorkspacesStore extends Store {
 
   async wipe() {
     // No-op: never delete user data on wipe
+    // We might reconsider this behavior in the future if we want to wipe everyhting because underlying payload structure changed, but for now it doesn't make you lose any data.
   }
 
   changeItemID() {
-    // No-op: single record, ID never changes
+    // No-op: single-record engine, ID never changes
   }
 }
 
