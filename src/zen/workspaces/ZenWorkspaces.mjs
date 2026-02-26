@@ -149,6 +149,63 @@ class nsZenWorkspaces {
       window.addEventListener("unload", () => {
         Services.obs.removeObserver(observerFunction, "workspace-bookmarks-updated");
       });
+
+      const syncHandler = (subject, topic, dataStr) => this._handleSyncDataApplied(dataStr);
+      Services.obs.addObserver(syncHandler, "zen-sync-data-applied");
+      window.addEventListener("unload", () => {
+        Services.obs.removeObserver(syncHandler, "zen-sync-data-applied");
+      });
+    }
+  }
+
+  /**
+   * Called when the sync engine has applied new data to the session file.
+   *
+   * Workspaces are updated live here because propagateWorkspaces() is
+   * purpose-built for this and is reliable.
+   *
+   * Pinned tabs and folders are intentionally NOT created live. They are
+   * already in the session file (written atomically by applySyncData) and
+   * will appear correctly when the browser is next opened or a new window
+   * is created, using the same session-restore path that
+   * handles groupId, folders, workspaces, and containers correctly.
+   * Attempting to create them live via gBrowser.addTab / createFolder is
+   * fragile because those APIs have ordering constraints and internal state
+   * guards that were not designed for external callers. Tried doing it live but it was a buggy mess,  this is good enough for now.
+   *
+   * @param {string} dataStr  JSON string of the raw incoming sync payload.
+   */
+  async _handleSyncDataApplied(dataStr) {
+    if (!this.#hasInitialized || this.privateWindowOrDisabled) {
+      return;
+    }
+    let data;
+    try {
+      data = JSON.parse(dataStr);
+    } catch {
+      return;
+    }
+    await this.promiseInitialized;
+
+    const incomingSpaces = data.spaces || [];
+    if (!incomingSpaces.length) {
+      return;
+    }
+
+    // Merge incoming spaces into the current workspace cache and push the
+    // result to all windows immediately via propagateWorkspaces().
+    const localMap = new Map(this._workspaceCache.map(w => [w.uuid, w]));
+    let changed = false;
+    for (const space of incomingSpaces) {
+      const existing = localMap.get(space.uuid);
+      const merged = existing ? { ...existing, ...space } : space;
+      if (!existing || JSON.stringify(existing) !== JSON.stringify(merged)) {
+        localMap.set(space.uuid, merged);
+        changed = true;
+      }
+    }
+    if (changed) {
+      await this.propagateWorkspaces(Array.from(localMap.values()));
     }
   }
 

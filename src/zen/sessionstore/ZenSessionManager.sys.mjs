@@ -78,6 +78,14 @@ export class nsZenSessionManager {
    * A deferred task to create backups of the session file.
    */
   #deferredBackupTask = null;
+  /**
+   * In-memory overlay of the most-recently synced data.
+   * Applied on top of every saveState() collection so that items not yet
+   * reflected in the live browser UI are not silently dropped.
+   *
+   * @type {{spaces: Array, pinnedTabs: Array, folders: Array, groups: Array}|null}
+   */
+  #syncOverlay = null;
 
   init() {
     this.log("Initializing session manager");
@@ -517,7 +525,7 @@ export class nsZenSessionManager {
     // Detect relevant workspace changes and notify the sync engine.
     const _relevantHash = JSON.stringify({
       s: this.#sidebar.spaces,
-      t: (this.#sidebar.tabs || []).filter(t => t.pinned),
+      t: (this.#sidebar.tabs || []).filter((t) => t.pinned),
       f: this.#sidebar.folders,
     });
     if (_relevantHash !== this._lastZenWorkspaceHash) {
@@ -632,6 +640,40 @@ export class nsZenSessionManager {
 
     sidebarData.lastCollected = Date.now();
     this.#collectTabsData(sidebarData, aStateWindows);
+
+    // Re-apply the sync overlay so that items not yet created in the live
+    // browser (e.g. a workspace received from sync that hasn't been rendered
+    // yet) survive this saveState() cycle and aren't silently dropped.
+    if (this.#syncOverlay) {
+      if (this.#syncOverlay.spaces?.length) {
+        sidebarData.spaces = this.#mergeByKey(
+          sidebarData.spaces || [],
+          this.#syncOverlay.spaces,
+          "uuid"
+        );
+      }
+      if (this.#syncOverlay.pinnedTabs?.length) {
+        sidebarData.tabs = this.#mergePinnedTabs(
+          sidebarData.tabs || [],
+          this.#syncOverlay.pinnedTabs
+        );
+      }
+      if (this.#syncOverlay.folders?.length) {
+        sidebarData.folders = this.#mergeByKey(
+          sidebarData.folders || [],
+          this.#syncOverlay.folders,
+          "id"
+        );
+      }
+      if (this.#syncOverlay.groups?.length) {
+        sidebarData.groups = this.#mergeByKey(
+          sidebarData.groups || [],
+          this.#syncOverlay.groups,
+          "id"
+        );
+      }
+    }
+
     this.#sidebar = sidebarData;
   }
 
@@ -825,21 +867,145 @@ export class nsZenSessionManager {
   }
 
   /**
-   * Applies sync data received from another device into the sidebar object
-   * and persists it to disk. Pinned tab changes take effect on next startup.
+   * Merges incoming sync data into the sidebar immediately, persists it to
+   * disk, and notifies all open windows so they can create any new
+   * workspaces / pinned tabs / folders without a browser restart.
    *
-   * @param {object} newData - Object with optional `spaces`, `tabs`, `folders` arrays.
+   * Merge rules:
+   *   - Existing local items are updated with incoming properties.
+   *   - New incoming items are added.
+   *   - Local items absent from the sync payload are preserved (never deleted) - we might reconsider this behavior in the future but for now it doesn't make you lose any data.
+   *
+   * @param {{ spaces: Array, pinnedTabs: Array, folders: Array, groups: Array }} data
    */
-  applySyncData(newData) {
-    if (!newData) return;
-    this.#sidebar = {
-      ...this.#sidebar,
-      spaces: newData.spaces ?? this.#sidebar.spaces,
-      tabs: newData.tabs ?? this.#sidebar.tabs,
-      folders: newData.folders ?? this.#sidebar.folders,
-    };
-    this.#file.data = this.#sidebar;
-    this.#file.saveSoon();
+  applySyncData(data) {
+    try {
+      if (!data) return;
+
+      let sidebar = { ...this.#sidebar };
+
+      if (data.spaces?.length) {
+        sidebar.spaces = this.#mergeByKey(sidebar.spaces || [], data.spaces, "uuid");
+      }
+      if (data.pinnedTabs?.length) {
+        sidebar.tabs = this.#mergePinnedTabs(sidebar.tabs || [], data.pinnedTabs);
+      }
+      if (data.folders?.length) {
+        sidebar.folders = this.#mergeByKey(sidebar.folders || [], data.folders, "id");
+      }
+      if (data.groups?.length) {
+        sidebar.groups = this.#mergeByKey(sidebar.groups || [], data.groups, "id");
+      }
+
+      this.#sidebar = sidebar;
+
+      // Keep an overlay so that saveState() doesn't drop items that haven't
+      // been created in the live browser UI yet.
+      this.#syncOverlay = {
+        spaces: sidebar.spaces || [],
+        pinnedTabs: (sidebar.tabs || []).filter((t) => t.pinned),
+        folders: sidebar.folders || [],
+        groups: sidebar.groups || [],
+      };
+
+      // Persist merged state to disk immediately.
+      this.#file.data = sidebar;
+      this.#file.saveSoon();
+
+      // Tell all open windows to create any new UI elements.
+      // The notification data is the raw incoming payload so that each window
+      // can compare it against its current state and act on new items only.
+      Services.obs.notifyObservers(null, "zen-sync-data-applied", JSON.stringify(data));
+
+      this.log("Applied sync data immediately");
+    } catch (e) {
+      console.error("ZenSessionManager: Failed to apply sync data:", e);
+    }
+  }
+
+  /**
+   * Merges two arrays of objects by a string key.
+   * Incoming items update existing local items or are appended if new.
+   * Local items not present in incoming are preserved unchanged.
+   *
+   * @param {Array} local     Local items.
+   * @param {Array} incoming  Incoming items from sync.
+   * @param {string} key      Property name to use as the unique key.
+   * @returns {Array}
+   */
+  #mergeByKey(local, incoming, key) {
+    let localMap = new Map(local.map((item) => [item[key], item]));
+    for (let item of incoming) {
+      if (!item[key]) continue;
+      let existing = localMap.get(item[key]);
+      localMap.set(item[key], existing ? { ...existing, ...item } : item);
+    }
+    return Array.from(localMap.values());
+  }
+
+  /**
+   * Merges an array of incoming synced pinned tabs into the local tab list.
+   *
+   * For each incoming pinned tab:
+   *   - If a local pinned tab with the same zenSyncId exists, its sync-able
+   *     metadata is updated (workspace, label, icon, container, etc.) while
+   *     local browsing history and position are preserved ( best of both worlds I guess?)
+   *   - If no local match exists, the tab is appended as a new pinned tab.
+   *   - No pinned tabs are ever deleted, we might reconsider this behavior in the future but for now it doesn't make you lose any data.
+   *
+   * Local pinned tabs without a zenSyncId and local non-pinned tabs are
+   * always preserved without modification.
+   *
+   * @param {Array} localTabs        Full local tab list (pinned + unpinned).
+   * @param {Array} incomingPinned   Pinned tabs from the sync payload.
+   * @returns {Array}
+   */
+  #mergePinnedTabs(localTabs, incomingPinned) {
+    let localPinnedById = new Map();
+    let localPinnedNoId = [];
+    let localUnpinned = [];
+
+    for (let tab of localTabs) {
+      if (!tab.pinned) {
+        localUnpinned.push(tab);
+      } else if (tab.zenSyncId) {
+        localPinnedById.set(tab.zenSyncId, tab);
+      } else {
+        localPinnedNoId.push(tab);
+      }
+    }
+
+    // Start with all existing local pinned-by-id tabs; update or add incoming.
+    let merged = new Map(localPinnedById);
+    for (let incoming of incomingPinned) {
+      let id = incoming.zenSyncId;
+      if (!id) continue;
+
+      let existing = localPinnedById.get(id);
+      if (existing) {
+        // Update sync-portable metadata; preserve local browsing/session state.
+        // groupId must be updated so that a tab moved into (or out of) a folder
+        // on one device reflects that change on the receiving device.
+        merged.set(id, {
+          ...existing,
+          groupId: incoming.groupId ?? existing.groupId,
+          zenWorkspace: incoming.zenWorkspace ?? existing.zenWorkspace,
+          zenEssential: incoming.zenEssential ?? existing.zenEssential,
+          zenStaticLabel: incoming.zenStaticLabel ?? existing.zenStaticLabel,
+          zenHasStaticIcon: incoming.zenHasStaticIcon ?? existing.zenHasStaticIcon,
+          zenDefaultUserContextId:
+            incoming.zenDefaultUserContextId ?? existing.zenDefaultUserContextId,
+          zenPinnedIcon: incoming.zenPinnedIcon ?? existing.zenPinnedIcon,
+          _zenPinnedInitialState:
+            incoming._zenPinnedInitialState ?? existing._zenPinnedInitialState,
+        });
+      } else {
+        // New pinned tab from another device - add it.
+        merged.set(id, incoming);
+      }
+    }
+
+    return [...localPinnedNoId, ...merged.values(), ...localUnpinned];
   }
 }
 
