@@ -318,14 +318,15 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
       (this._lastOpenedTab.getAttribute("zen-workspace-id") !==
         draggedTab.getAttribute("zen-workspace-id") &&
         !this._lastOpenedTab.hasAttribute("zen-essential") &&
-        !draggedTab.hasAttribute("zen-essential"))
+        !draggedTab.hasAttribute("zen-essential")) ||
+      this._lastOpenedTab.hasAttribute("zen-live-folder-item-id")
     ) {
       this._lastOpenedTab = gBrowser.selectedTab;
     }
     if (!draggedTab || this._canDrop || this._hasAnimated || this.fakeBrowser) {
       return;
     }
-    if (draggedTab.splitView) {
+    if (draggedTab.splitView || draggedTab.hasAttribute("zen-live-folder-item-id")) {
       return;
     }
     const currentView = this._data[this._lastOpenedTab.splitViewValue];
@@ -1296,8 +1297,9 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
       const allArePinned = tabs.every((tab) => tab.pinned);
       const thereIsOnePinned = tabs.some((tab) => tab.pinned);
       const thereIsOneEssential = tabs.some((tab) => tab.hasAttribute("zen-essential"));
+      const thereIsOneLiveFolder = tabs.some((tab) => tab.hasAttribute("zen-live-folder-item-id"));
 
-      if (thereIsOneEssential || (thereIsOnePinned && !allArePinned)) {
+      if (thereIsOneEssential || (thereIsOnePinned && !allArePinned) || thereIsOneLiveFolder) {
         for (let i = 0; i < tabs.length; i++) {
           const tab = tabs[i];
           if (tab.pinned) {
