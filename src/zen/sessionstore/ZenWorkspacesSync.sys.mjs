@@ -57,12 +57,12 @@ class ZenWorkspacesStore extends Store {
     // Only sync spaces, pinned/essential tabs, folders, and containers.
     // Regular browsing tabs are device-local and are never synced (for now)
     let spaces = sidebar.spaces || [];
-    let pinnedTabs = (sidebar.tabs || []).filter(tab => tab.pinned);
+    let pinnedTabs = (sidebar.tabs || []).filter((tab) => tab.pinned);
     let folders = sidebar.folders || [];
 
     let groups = sidebar.groups || [];
 
-    let containers = lazy.ContextualIdentityService.getPublicIdentities().map(c => ({
+    let containers = lazy.ContextualIdentityService.getPublicIdentities().map((c) => ({
       userContextId: c.userContextId,
       name: c.name,
       icon: c.icon,
@@ -116,7 +116,7 @@ class ZenWorkspacesStore extends Store {
   async _syncContainers(incoming) {
     try {
       let local = lazy.ContextualIdentityService.getPublicIdentities();
-      let localById = new Map(local.map(c => [c.userContextId, c]));
+      let localById = new Map(local.map((c) => [c.userContextId, c]));
 
       for (let container of incoming) {
         if (!container.name) {
