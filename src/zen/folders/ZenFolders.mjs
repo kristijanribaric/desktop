@@ -1533,7 +1533,7 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     this.#animationCount += 1;
     await Promise.all(animations);
     this.#animationCount -= 1;
-    gBrowser.tabContainer._invalidateCachedTabs();
+    gBrowser.tabContainer._invalidateCachedVisibleTabs();
   }
 
   async animateUnload(group, tabToUnload, ungroup = false) {
