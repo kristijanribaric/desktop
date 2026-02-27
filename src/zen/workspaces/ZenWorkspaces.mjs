@@ -778,7 +778,6 @@ class nsZenWorkspaces {
       this._shouldHaveWorkspaces =
         chromeFlags & Ci.nsIWebBrowserChrome.CHROME_TOOLBAR ||
         chromeFlags & Ci.nsIWebBrowserChrome.CHROME_MENUBAR;
-      return this._shouldHaveWorkspaces;
     }
     return this._shouldHaveWorkspaces && !document.documentElement.hasAttribute("taskbartab");
   }
