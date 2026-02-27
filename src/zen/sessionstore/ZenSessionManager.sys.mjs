@@ -882,7 +882,9 @@ export class nsZenSessionManager {
    */
   applySyncData(data) {
     try {
-      if (!data) {return;}
+      if (!data) {
+        return;
+      }
 
       let sidebar = { ...this.#sidebar };
 
@@ -938,7 +940,9 @@ export class nsZenSessionManager {
   #mergeByKey(local, incoming, key) {
     let localMap = new Map(local.map((item) => [item[key], item]));
     for (let item of incoming) {
-      if (!item[key]) {continue;}
+      if (!item[key]) {
+        continue;
+      }
       let existing = localMap.get(item[key]);
       localMap.set(item[key], existing ? { ...existing, ...item } : item);
     }
@@ -981,7 +985,9 @@ export class nsZenSessionManager {
     let merged = new Map(localPinnedById);
     for (let incoming of incomingPinned) {
       let id = incoming.zenSyncId;
-      if (!id) {continue;}
+      if (!id) {
+        continue;
+      }
 
       let existing = localPinnedById.get(id);
       if (existing) {

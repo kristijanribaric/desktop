@@ -194,7 +194,7 @@ class nsZenWorkspaces {
 
     // Merge incoming spaces into the current workspace cache and push the
     // result to all windows immediately via propagateWorkspaces().
-    const localMap = new Map(this._workspaceCache.map(w => [w.uuid, w]));
+    const localMap = new Map(this._workspaceCache.map((w) => [w.uuid, w]));
     let changed = false;
     for (const space of incomingSpaces) {
       const existing = localMap.get(space.uuid);
