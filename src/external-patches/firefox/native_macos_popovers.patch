@@ -22,7 +22,7 @@ diff --git a/browser/components/asrouter/modules/FeatureCallout.sys.mjs b/browse
              type="arrow"
              consumeoutsideclicks="never"
              norolluponanchor="true"
-+            nonnativepopover="true"
++ 
              position="${panel_position.panel_position_string}"
              ${hide_arrow ? "" : 'show-arrow=""'}
              ${autohide ? "" : 'noautohide="true"'}

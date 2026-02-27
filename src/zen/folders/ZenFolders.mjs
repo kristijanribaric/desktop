@@ -744,7 +744,7 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     size *= 48;
     return {
       position,
-      x: 10,
+      x: isRightSide ? -10 : 10,
       y: size / -2,
     };
   }
