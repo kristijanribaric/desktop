@@ -221,7 +221,7 @@ export class nsZenSessionManager {
     try {
       await this.#file.load();
       this._dataFromFile = this.#file.data;
-      if (!this._dataFromFile?.spaces) {
+      if (!this._dataFromFile?.spaces?.length) {
         // Go to the catch block to try to recover from backup files
         // if the file is empty or has invalid data, as it can happen if the app
         // crashes while writing the session file.
@@ -232,6 +232,9 @@ export class nsZenSessionManager {
         try {
           let data = await IOUtils.readJSON(backupFile, { decompress: true });
           this.log(`Recovered data from backup file ${backupFile}`);
+          if (!data?.spaces?.length) {
+            continue;
+          }
           this._dataFromFile = data;
           break;
         } catch (e) {
@@ -710,6 +713,12 @@ export class nsZenSessionManager {
     // Folders are always pinned, so we dont need to check for the pinned state here.
     aWindowData.folders = sidebar.folders;
     aWindowData.spaces = sidebar.spaces;
+    this.log("Restored sidebar data into window", {
+      tabs: aWindowData.tabs?.length || 0,
+      groups: aWindowData.groups?.length || 0,
+      folders: aWindowData.folders?.length || 0,
+      spaces: aWindowData.spaces?.length || 0,
+    });
   }
 
   /**
