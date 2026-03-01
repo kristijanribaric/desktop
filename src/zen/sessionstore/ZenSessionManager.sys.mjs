@@ -450,7 +450,8 @@ export class nsZenSessionManager {
       ];
     }
     for (const winData of initialState?.windows || []) {
-      winData.spaces = winData.spaces || this._migrationData?.spaces || [];
+      winData.spaces =
+        (winData.spaces?.length ? winData.spaces : this._migrationData?.spaces) || [];
       if (winData.tabs) {
         for (const tabData of winData.tabs) {
           let storeId = tabData.zenSyncId || tabData.zenPinnedId;

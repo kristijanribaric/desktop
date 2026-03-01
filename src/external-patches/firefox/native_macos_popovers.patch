@@ -131,7 +131,7 @@ diff --git a/toolkit/themes/shared/global-shared.css b/toolkit/themes/shared/glo
  /* Lightweight theme roots */
  
  :root[lwtheme] {
-   body,
+   .browser-toolbox-background,
    toolbar,
 diff --git a/widget/cocoa/nsCocoaWindow.h b/widget/cocoa/nsCocoaWindow.h
 --- a/widget/cocoa/nsCocoaWindow.h
