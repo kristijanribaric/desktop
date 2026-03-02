@@ -1140,9 +1140,7 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     }
 
     gBrowser.tabContainer._invalidateCachedTabs();
-    setTimeout(() => {
-      delete this._sessionRestoring;
-    }, 0);
+    delete this._sessionRestoring;
   }
 
   /**
@@ -1278,7 +1276,7 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
   }
 
   get #folderAnimationDuration() {
-    return this._sessionRestoring || this._dontAnimateFolder ? 0 : 0.12;
+    return this._dontAnimateFolder ? 0 : 0.12;
   }
 
   async animateCollapse(group) {
@@ -1696,7 +1694,10 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
       for (let i = 0; i < groupItems.length; i++) {
         const { item, splitViewId } = groupItems[i];
 
-        itemsToShow.push(item);
+        let itemVisible = item.visible;
+        if (itemVisible) {
+          itemsToShow.push(item);
+        }
 
         // Skip selected items
         if (selectedTabs.includes(item)) {
@@ -1708,7 +1709,7 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
           continue;
         }
 
-        if (!item.hasAttribute?.("folder-active")) {
+        if (!itemVisible) {
           if (!itemsToHide.includes(item)) {
             itemsToHide.push(item);
           }
