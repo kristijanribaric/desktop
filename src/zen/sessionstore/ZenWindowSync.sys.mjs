@@ -810,11 +810,18 @@ class nsZenWindowSync {
       aOtherTab,
       () => {
         this.log(`Swapping docshells between windows for tab ${aOurTab.id}`);
-        aOurTab.ownerGlobal.gBrowser.swapBrowsersAndCloseOther(
-          aOurTab,
-          aOtherTab,
-          false
-        );
+        try {
+          aOurTab.ownerGlobal.gBrowser.swapBrowsersAndCloseOther(
+            aOurTab,
+            aOtherTab,
+            false
+          );
+        } catch (e) {
+          console.error(
+            `Error swapping browsers for tabs ${aOurTab.id} and ${aOtherTab.id}:`,
+            e
+          );
+        }
 
         // Swap permanent keys
         if (!onClose) {
@@ -1221,9 +1228,15 @@ class nsZenWindowSync {
         {},
         /* zenForceSync = */ true
       );
-      win.gZenWorkspaces.promiseInitialized.then(() => {
-        moveAllTabsToWindow();
-      });
+      win.addEventListener(
+        "MozBeforeInitialXULLayout",
+        () => {
+          win.gZenStartup.promiseInitialized.then(() => {
+            moveAllTabsToWindow();
+          });
+        },
+        { once: true }
+      );
       return;
     }
     moveAllTabsToWindow(true);
