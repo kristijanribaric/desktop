@@ -73,6 +73,10 @@ jobs:
             npm run sync
           fi
 
+      - name: Run Import
+        if: steps.check-upstream-branch.outputs.branch_exists == 'false'
+        run: npm run import
+
       - name: Run Bootstrap
         if: steps.check-upstream-branch.outputs.branch_exists == 'false'
         run: npm run bootstrap
