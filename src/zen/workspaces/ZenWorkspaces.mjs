@@ -2072,14 +2072,10 @@ class nsZenWorkspaces {
         const essentialsContainer = this.getEssentialsSection(
           workspace.containerTabId
         );
-        if (
-          clonedEssentials[clonedEssentials.length - 1]?.contextId ==
-          workspace.containerTabId
-        ) {
-          clonedEssentials[clonedEssentials.length - 1].repeat++;
-          clonedEssentials[clonedEssentials.length - 1].workspaces.push(
-            workspace
-          );
+        let lastCloned = clonedEssentials[clonedEssentials.length - 1];
+        if (lastCloned && lastCloned.contextId == workspace.containerTabId) {
+          lastCloned.repeat++;
+          lastCloned.workspaces.push(workspace);
           continue;
         }
         essentialsContainer.setAttribute("hidden", "true");

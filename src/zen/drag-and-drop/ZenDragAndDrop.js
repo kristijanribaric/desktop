@@ -1229,6 +1229,10 @@
       let showIndicatorUnderNewTabButton = false;
       let dropBefore = false;
       let dropElementFromEvent = event.target.closest(dropZoneSelector);
+      if (!dropElement && dropElementFromEvent?.isZenFolder) {
+        // If we're dragging over a folder, we want to show the indicator on the folder itself, not the label.
+        dropElementFromEvent = dropElementFromEvent.labelElement;
+      }
       dropElement = dropElementFromEvent || dropElement;
       if (!dropElementFromEvent) {
         let hoveringPeriphery = !!event.target.closest(
