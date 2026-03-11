@@ -53,28 +53,66 @@ class ZenWorkspacesStore extends Store {
     }
 
     let sidebar = lazy.ZenSessionStore.getSidebarData();
+    const metaSnapshot = lazy.ZenSessionStore.getSyncMetaSnapshot();
 
-    // Only sync spaces, pinned/essential tabs, folders, and containers.
-    // Regular browsing tabs are device-local and are never synced (for now)
-    let spaces = sidebar.spaces || [];
-    let pinnedTabs = (sidebar.tabs || []).filter((tab) => tab.pinned);
-    let folders = sidebar.folders || [];
+    // Sync spaces, ALL tabs with zenSyncId, folders, and containers.
+    // Strip syncStatus (internal only) and stamp modifiedAt from syncMeta.
+    let spaces = (sidebar.spaces || []).map(({ syncStatus: _s, ...rest }) => ({
+      ...rest,
+      modifiedAt: metaSnapshot.spaces?.[rest.uuid]?.modifiedAt ?? 0,
+    }));
+
+    let tabs = (sidebar.tabs || [])
+      .filter((tab) => tab.zenSyncId && !(tab.zenIsEmpty && !tab.groupId))
+      .map((tab) => {
+        // Strip heavy session state and internal runtime flags.
+        const {
+          syncStatus: _s,
+          scroll: _sc,
+          formdata: _fd,
+          selected: _sel,
+          _zenIsActiveTab: _a,
+          _zenContentsVisible: _c,
+          _zenChangeLabelFlag: _cl,
+          ...rest
+        } = tab;
+        // For unpinned tabs, trim entries to just the active entry
+        if (!tab.pinned && rest.entries?.length) {
+          const idx = typeof rest.index === "number" ? Math.max(0, rest.index - 1) : 0;
+          const entry = rest.entries[idx] || rest.entries[0];
+          rest.entries = entry ? [entry] : [];
+          rest.index = 1;
+        }
+        return {
+          ...rest,
+          modifiedAt: metaSnapshot.tabs?.[rest.zenSyncId]?.modifiedAt ?? 0,
+        };
+      });
+
+    let folders = (sidebar.folders || []).map(({ syncStatus: _s, ...rest }) => ({
+      ...rest,
+      modifiedAt: metaSnapshot.folders?.[String(rest.id)]?.modifiedAt ?? 0,
+    }));
 
     let groups = sidebar.groups || [];
+
+    let splitViewData = sidebar.splitViewData || [];
 
     let containers = lazy.ContextualIdentityService.getPublicIdentities().map((c) => ({
       userContextId: c.userContextId,
       name: c.name,
       icon: c.icon,
       color: c.color,
+      modifiedAt: metaSnapshot.containers?.[String(c.userContextId)]?.modifiedAt ?? 0,
     }));
 
     record.cleartext = {
       id: lazy.ZEN_WORKSPACES_GUID,
       spaces,
-      pinnedTabs,
+      tabs,
       folders,
       groups,
+      splitViewData,
       containers,
     };
     return record;
@@ -92,56 +130,16 @@ class ZenWorkspacesStore extends Store {
     if (!data) {
       return;
     }
-
-    // Sync containers immediately - they must exist before the next startup
-    // so that pinned tabs with a userContextId open in the right container, also cuz workspaces depend on them.
-    await this._syncContainers(data.containers || []);
-
-    // Apply workspaces/tabs/folders/groups immediately.
+    // Pass all data (including containers) to applySyncData which now handles
+    // container reconciliation internally via ContextualIdentityService.
     await lazy.ZenSessionStore.applySyncData({
       spaces: data.spaces || [],
-      pinnedTabs: data.pinnedTabs || [],
+      tabs: data.tabs || data.pinnedTabs || [],
       folders: data.folders || [],
       groups: data.groups || [],
+      splitViewData: data.splitViewData || [],
+      containers: data.containers || [],
     });
-  }
-
-  /**
-   * Ensures every incoming container exists locally with the same userContextId.
-   * Creates missing ones (with explicit ID so both devices share the same numeric
-   * value) and updates existing ones. Never removes containers.
-   *
-   * @param {Array<{userContextId, name, icon, color}>} incoming
-   */
-  async _syncContainers(incoming) {
-    try {
-      let local = lazy.ContextualIdentityService.getPublicIdentities();
-      let localById = new Map(local.map((c) => [c.userContextId, c]));
-
-      for (let container of incoming) {
-        if (!container.name) {
-          continue;
-        }
-        if (localById.has(container.userContextId)) {
-          lazy.ContextualIdentityService.update(
-            container.userContextId,
-            container.name,
-            container.icon,
-            container.color
-          );
-        } else {
-          // Pass explicit ID so both devices share the same numeric userContextId. Made possible my patching the create method on ContextualIdentityService to accept an explicit ID. ( Fuck incremental ID generation!)
-          lazy.ContextualIdentityService.create(
-            container.name,
-            container.icon,
-            container.color,
-            container.userContextId
-          );
-        }
-      }
-    } catch (e) {
-      console.error("ZenWorkspacesSync: Error syncing containers:", e);
-    }
   }
 
   async remove() {
@@ -230,5 +228,10 @@ export class ZenWorkspacesEngine extends SyncEngine {
       return { [lazy.ZEN_WORKSPACES_GUID]: 0 };
     }
     return {};
+  }
+
+  async _syncFinish() {
+    await super._syncFinish();
+    lazy.ZenSessionStore.markAllItemsSynced();
   }
 }

@@ -4,6 +4,11 @@
 
 import { nsZenDOMOperatedFeature } from "chrome://browser/content/zen-components/ZenCommonUtils.mjs";
 
+const lazy = {};
+ChromeUtils.defineESModuleGetters(lazy, {
+  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
+});
+
 function formatRelativeTime(timestamp) {
   const now = Date.now();
 
@@ -234,6 +239,10 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     if (groupIsCollapsiblePins(group)) {
       return;
     }
+    // Mark tab as modified for sync when its folder membership changes.
+    if (tab.id && group?.isZenFolder) {
+      lazy.ZenSessionStore.setSyncMetaModified("tabs", tab.id);
+    }
     group.pinned = tab.pinned;
     const isActiveFolder = group?.activeGroups?.length > 0;
 
@@ -329,6 +338,10 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
   async on_TabUngrouped(event) {
     const tab = event.detail;
     const group = event.target;
+    // Mark tab as modified for sync when its folder membership changes.
+    if (tab.id && group?.isZenFolder) {
+      lazy.ZenSessionStore.setSyncMetaModified("tabs", tab.id);
+    }
     if (
       group.hasAttribute("split-view-group") &&
       tab.hasAttribute("had-zen-pinned-changed")
@@ -556,18 +569,22 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
         ? workspacePinned
         : gZenWorkspaces.pinnedTabsContainer;
     const insertBefore =
-      options.insertBefore ||
-      pinnedContainer.querySelector(".pinned-tabs-container-separator");
-    const emptyTab = gBrowser.addTab("about:blank", {
-      skipAnimation: true,
-      pinned: true,
-      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-      _forZenEmptyTab: true,
-      createLazyBrowser: true,
-    });
+      options.insertBefore || pinnedContainer.querySelector(".pinned-tabs-container-separator");
 
-    gBrowser.pinTab(emptyTab);
-    tabs = [emptyTab, ...filteredTabs];
+    if (!options.skipEmptyTab) {
+      const emptyTab = gBrowser.addTab("about:blank", {
+        skipAnimation: true,
+        pinned: true,
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        _forZenEmptyTab: true,
+        createLazyBrowser: true,
+      });
+
+      gBrowser.pinTab(emptyTab);
+      tabs = [emptyTab, ...filteredTabs];
+    } else {
+      tabs = filteredTabs;
+    }
 
     const folder = this._createFolderNode(options);
 
@@ -597,6 +614,9 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     }
 
     this.#groupInit(folder);
+    if (folder.id) {
+      lazy.ZenSessionStore.setSyncMetaNew("folders", folder.id);
+    }
     return folder;
   }
 

@@ -6,6 +6,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   ZenLiveFoldersManager:
     "resource:///modules/zen/ZenLiveFoldersManager.sys.mjs",
+  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
 });
 
 export class nsZenFolder extends MozTabbrowserTabGroup {
@@ -172,6 +173,9 @@ export class nsZenFolder extends MozTabbrowserTabGroup {
   }
 
   async delete() {
+    if (this.id) {
+      lazy.ZenSessionStore.removeFromSyncMeta("folders", this.id);
+    }
     for (const tab of this.allItemsRecursive) {
       if (tab.hasAttribute("zen-empty-tab")) {
         // Manually remove the empty tabs as removeTabs() inside removeTabGroup

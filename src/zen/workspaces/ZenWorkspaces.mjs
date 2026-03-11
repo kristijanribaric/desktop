@@ -168,63 +168,282 @@ class nsZenWorkspaces {
           "workspace-bookmarks-updated"
         );
       });
-
-      const syncHandler = (subject, topic, dataStr) => this._handleSyncDataApplied(dataStr);
-      Services.obs.addObserver(syncHandler, "zen-sync-data-applied");
-      window.addEventListener("unload", () => {
-        Services.obs.removeObserver(syncHandler, "zen-sync-data-applied");
-      });
     }
   }
 
   /**
-   * Called when the sync engine has applied new data to the session file.
+   * Applies live sync changes: updates workspace cache, removes deleted items,
+   * then creates/updates pulled items.
+   * Called on ONE window by ZenSessionManager; ZenWindowSync propagates
+   * new/removed items to every other open window automatically.
    *
-   * Workspaces are updated live here because propagateWorkspaces() is
-   * purpose-built for this and is reliable.
-   *
-   * Pinned tabs and folders are intentionally NOT created live. They are
-   * already in the session file (written atomically by applySyncData) and
-   * will appear correctly when the browser is next opened or a new window
-   * is created, using the same session-restore path that
-   * handles groupId, folders, workspaces, and containers correctly.
-   * Attempting to create them live via gBrowser.addTab / createFolder is
-   * fragile because those APIs have ordering constraints and internal state
-   * guards that were not designed for external callers. Tried doing it live but it was a buggy mess,  this is good enough for now.
-   *
-   * @param {string} dataStr  JSON string of the raw incoming sync payload.
+   * @param {{ spaces: Array, tabs: Array, folders: Array }} pulled  Reconcile-pulled items.
+   * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} removals  Items to remove.
    */
-  async _handleSyncDataApplied(dataStr) {
-    if (!this.#hasInitialized || this.privateWindowOrDisabled) {
-      return;
+  async _applySyncChanges(pulled, removals = {}) {
+    if (!this.shouldHaveWorkspaces || this.privateWindowOrDisabled) return;
+    await this.promiseInitialized;
+
+    // 1. Update workspace cache (remove deleted, merge pulled)
+    const removedSpaceIds = new Set((removals.spaces || []).map((s) => s.uuid));
+    if (removedSpaceIds.size || pulled.spaces?.length) {
+      const localMap = new Map(
+        this._workspaceCache.filter((w) => !removedSpaceIds.has(w.uuid)).map((w) => [w.uuid, w])
+      );
+      for (const space of pulled.spaces || []) {
+        const existing = localMap.get(space.uuid);
+        localMap.set(space.uuid, existing ? { ...existing, ...space } : space);
+      }
+      await this.propagateWorkspaces(Array.from(localMap.values()));
+      this.#propagateWorkspaceData();
     }
-    let data;
-    try {
-      data = JSON.parse(dataStr);
-    } catch {
+
+    // 2. Remove deleted folders/tabs
+    await this._removeSyncedItems(removals);
+
+    // 3. Create/update pulled folders and tabs
+    await this._applyPulledItems(pulled);
+  }
+
+  /**
+   * Removes folders and tabs that were previously synced but are absent
+   * from the latest incoming sync payload.
+   *
+   * Workspace removal is handled via propagateWorkspaces() in
+   * _applySyncChanges.
+   *
+   * @param {{ folders: Array, tabs: Array }} removals
+   */
+  async _removeSyncedItems(removals) {
+    if (!this.shouldHaveWorkspaces || this.privateWindowOrDisabled) {
       return;
     }
     await this.promiseInitialized;
 
-    const incomingSpaces = data.spaces || [];
-    if (!incomingSpaces.length) {
+    // Remove folders first; tabs inside them are removed together with the folder.
+    for (const folderData of removals.folders || []) {
+      if (!folderData.id) {
+        continue;
+      }
+      const folder = document.getElementById(folderData.id);
+      if (folder?.isZenFolder) {
+        await folder.delete();
+      }
+    }
+
+    // Remove tabs not already cleaned up by folder deletion.
+    for (const tabData of removals.tabs || []) {
+      if (!tabData.zenSyncId) {
+        continue;
+      }
+      const tab = document.getElementById(tabData.zenSyncId);
+      if (tab && gBrowser.isTab(tab)) {
+        gBrowser.removeTab(tab, { animate: false });
+      }
+    }
+  }
+
+  /**
+   * Creates or updates folders and tabs that arrived from Firefox Sync.
+   *
+   * Called on ONE window by ZenSessionManager; ZenWindowSync propagates every
+   * new/updated item to all other open windows automatically.
+   *
+   * Ordering rules:
+   *   1. Folders first — tabs need the folder elements to exist so they can
+   *      be placed inside them immediately after being pinned.
+   *   2. Essential tabs — use addToEssentials() which handles pinning and
+   *      placement in the essentials container.
+   *   3. Regular pinned tabs — restoreInitialTabData → pinTab → addTabs into
+   *      their folder (if any).  The subsequent TabMove event causes
+   *      ZenWindowSync to mirror the folder placement to all other windows.
+   *   4. Unpinned tabs — created with addTrustedTab and placed in the
+   *      correct workspace/folder.
+   *
+   * @param {{ tabs: Array, folders: Array }} pulled  Reconcile-pulled items.
+   */
+  async _applyPulledItems(pulled) {
+    if (!this.shouldHaveWorkspaces || this.privateWindowOrDisabled) {
+      return;
+    }
+    await this.promiseInitialized;
+
+    const incomingFolders = pulled.folders || [];
+    // Filter out folder placeholder tabs — they should never be synced.
+    const incomingTabs = (pulled.tabs || []).filter((t) => !t.zenIsEmpty);
+
+    if (!incomingFolders.length && !incomingTabs.length) {
       return;
     }
 
-    // Merge incoming spaces into the current workspace cache and push the
-    // result to all windows immediately via propagateWorkspaces().
-    const localMap = new Map(this._workspaceCache.map((w) => [w.uuid, w]));
-    let changed = false;
-    for (const space of incomingSpaces) {
-      const existing = localMap.get(space.uuid);
-      const merged = existing ? { ...existing, ...space } : space;
-      if (!existing || JSON.stringify(existing) !== JSON.stringify(merged)) {
-        localMap.set(space.uuid, merged);
-        changed = true;
+    // Step 1 — create or update folders.
+    for (const folderData of incomingFolders) {
+      if (!folderData.id) {
+        continue;
+      }
+      const existing = document.getElementById(folderData.id);
+      if (existing?.isZenFolder) {
+        // Update existing folder
+        if (folderData.name && existing.label !== folderData.name) existing.label = folderData.name;
+        if (folderData.collapsed !== undefined) existing.collapsed = folderData.collapsed;
+        if (folderData.workspaceId)
+          existing.setAttribute("zen-workspace-id", folderData.workspaceId);
+        if (folderData.userIcon !== undefined)
+          gZenFolders.setFolderUserIcon(existing, folderData.userIcon);
+        existing.dispatchEvent(new CustomEvent("TabGroupUpdate", { bubbles: true }));
+      } else {
+        // Create new folder — skip the placeholder empty tab since real tabs
+        // will be added in step 2 from the pulled tabs.
+        gZenFolders.createFolder([], {
+          id: folderData.id,
+          label: folderData.name || "Folder",
+          workspaceId: folderData.workspaceId,
+          collapsed: folderData.collapsed,
+          skipEmptyTab: true,
+        });
       }
     }
-    if (changed) {
-      await this.propagateWorkspaces(Array.from(localMap.values()));
+
+    // Step 2 — create or update tabs (pinned AND unpinned).
+    for (const tabData of incomingTabs) {
+      if (!tabData.zenSyncId) {
+        continue;
+      }
+      const existingTab = document.getElementById(tabData.zenSyncId);
+      if (existingTab && gBrowser.isTab(existingTab)) {
+        // Update existing tab (same logic for both pinned and unpinned)
+        if (tabData.zenWorkspace)
+          existingTab.setAttribute("zen-workspace-id", tabData.zenWorkspace);
+        const currentGroupId = existingTab.group?.id || null;
+        const targetGroupId = tabData.groupId || null;
+        if (currentGroupId !== targetGroupId) {
+          if (targetGroupId) {
+            const folder = document.getElementById(targetGroupId);
+            if (folder?.isZenFolder) folder.addTabs([existingTab]);
+          } else if (currentGroupId) {
+            gBrowser.ungroupTab(existingTab);
+          }
+        }
+        continue;
+      }
+
+      if (tabData.pinned) {
+        // --- PINNED TAB CREATION ---
+
+        // Build _zenPinnedInitialState from the session entries if the sync
+        // payload doesn't already include it.  This is needed so that:
+        //   1. ZenWindowSync skips setPinnedTabState (which would clobber with
+        //      an empty about:blank entry) because tab._zenPinnedInitialState is set.
+        //   2. We can derive the correct visual label and favicon below.
+        //   3. resetPinnedTab can restore the tab's URL / history.
+        // Session index is 1-based; convert to 0-based.
+        let pinnedInitialState = tabData._zenPinnedInitialState;
+        if (!pinnedInitialState && tabData.entries?.length) {
+          const entryIndex = typeof tabData.index === "number" ? Math.max(0, tabData.index - 1) : 0;
+          const entry = tabData.entries[entryIndex] ?? tabData.entries[0];
+          pinnedInitialState = { entry, image: tabData.image || "" };
+        }
+
+        // Create the tab unpinned so ZenWindowSync does NOT mirror it yet
+        // (with gSyncOnlyPinnedTabs=true it skips unpinned tabs in on_TabOpen).
+        const newTab = gBrowser.addTrustedTab("about:blank", { createLazyBrowser: true });
+
+        // Set the zenSyncId as the DOM id BEFORE pinning.  The guard we added
+        // to ZenWindowSync.on_TabOpen (!tab.id) will preserve this id through
+        // the duringPinning code-path so ZenWindowSync propagates the tab to
+        // other windows with the correct id.
+        newTab.id = tabData.zenSyncId;
+
+        if (tabData.zenEssential) {
+          // Set attributes manually but skip zen-essential — addToEssentials()
+          // must set it; if it is already present the method skips the tab.
+          if (tabData.zenWorkspace) {
+            newTab.setAttribute("zen-workspace-id", tabData.zenWorkspace);
+          }
+          if (typeof tabData.zenStaticLabel === "string") {
+            newTab.zenStaticLabel = tabData.zenStaticLabel;
+          }
+          if (tabData.zenHasStaticIcon && tabData.image) {
+            newTab.zenStaticIcon = tabData.image;
+          }
+          if (pinnedInitialState) {
+            newTab._zenPinnedInitialState = pinnedInitialState;
+          }
+          // Set visual label and favicon BEFORE pinning so that when
+          // ZenWindowSync's on_TabOpen(duringPinning:true) mirrors this tab
+          // it copies the correct label/icon to other windows.
+          const label = newTab.zenStaticLabel || pinnedInitialState?.entry?.title || "";
+          if (label) {
+            gBrowser._setTabLabel(newTab, label);
+          }
+          const image = tabData.image || pinnedInitialState?.image || "";
+          if (image) {
+            gBrowser.setIcon(newTab, image);
+          }
+          // addToEssentials pins the tab and moves it to the essentials section.
+          // ZenWindowSync mirrors the pinned essential to other windows.
+          gZenPinnedTabManager.addToEssentials(newTab);
+          // Restore the tab's session state (URL / history) from pinnedInitialState.
+          gZenPinnedTabManager.resetPinnedTab(newTab);
+        } else {
+          // restoreInitialTabData sets workspace-id, static label/icon, and
+          // _zenPinnedInitialState (preventing ZenWindowSync from overwriting
+          // the pinned initial state with an empty about:blank state).
+          gZenSessionStore.restoreInitialTabData(newTab, tabData);
+          // Use the built pinnedInitialState if restoreInitialTabData didn't set one.
+          if (!newTab._zenPinnedInitialState && pinnedInitialState) {
+            newTab._zenPinnedInitialState = pinnedInitialState;
+          }
+          // Set visual label and favicon BEFORE pinning so that when
+          // ZenWindowSync's on_TabOpen(duringPinning:true) mirrors this tab
+          // it copies the correct label/icon to other windows.
+          const label = newTab.zenStaticLabel || pinnedInitialState?.entry?.title || "";
+          if (label) {
+            gBrowser._setTabLabel(newTab, label);
+          }
+          const image = tabData.image || pinnedInitialState?.image || "";
+          if (image) {
+            gBrowser.setIcon(newTab, image);
+          }
+          // pinTab triggers ZenWindowSync to mirror the tab (with correct id)
+          // to every other open window.
+          gBrowser.pinTab(newTab);
+          // Restore the tab's session state (URL / history) from pinnedInitialState.
+          gZenPinnedTabManager.resetPinnedTab(newTab);
+          // If this tab belongs to a folder, move it in now.  The subsequent
+          // TabMove event causes ZenWindowSync to mirror the folder placement
+          // into the corresponding folder in every other window.
+          if (tabData.groupId) {
+            const folder = document.getElementById(tabData.groupId);
+            if (folder?.isZenFolder) {
+              folder.addTabs([newTab]);
+            }
+          }
+        }
+      } else {
+        // --- UNPINNED TAB CREATION ---
+        const activeEntry = tabData.entries?.[0] || {};
+        const url = activeEntry.url || "about:blank";
+        const newTab = gBrowser.addTrustedTab(url, { createLazyBrowser: true });
+        newTab.id = tabData.zenSyncId;
+        if (tabData.zenWorkspace) {
+          newTab.setAttribute("zen-workspace-id", tabData.zenWorkspace);
+        }
+        const label = activeEntry.title || url;
+        if (label) {
+          gBrowser._setTabLabel(newTab, label);
+        }
+        if (tabData.image) {
+          gBrowser.setIcon(newTab, tabData.image);
+        }
+        // Place in folder if applicable
+        if (tabData.groupId) {
+          const folder = document.getElementById(tabData.groupId);
+          if (folder?.isZenFolder) {
+            folder.addTabs([newTab]);
+          }
+        }
+      }
     }
   }
 
@@ -1483,13 +1702,16 @@ class nsZenWorkspaces {
     );
     if (index !== -1) {
       workspacesData[index] = workspaceData;
+      lazy.ZenSessionStore.setSyncMetaModified("spaces", workspaceData.uuid);
     } else {
       workspacesData.push(workspaceData);
+      lazy.ZenSessionStore.setSyncMetaNew("spaces", workspaceData.uuid);
     }
     this.#propagateWorkspaceData();
   }
 
   removeWorkspace(windowID) {
+    lazy.ZenSessionStore.removeFromSyncMeta("spaces", windowID);
     let workspacesData = this.getWorkspaces();
     // Remove the workspace from the cache
     workspacesData = workspacesData.filter(
@@ -1635,6 +1857,10 @@ class nsZenWorkspaces {
     workspaces.splice(newPosition, 0, workspace);
     // Propagate the changes if the order has changed
     if (currentIndex !== newPosition) {
+      // Mark all workspaces as modified so the new order is pushed to sync.
+      for (const ws of workspaces) {
+        lazy.ZenSessionStore.setSyncMetaModified("spaces", ws.uuid);
+      }
       this.#propagateWorkspaceData();
     }
   }

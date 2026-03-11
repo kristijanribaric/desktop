@@ -1272,14 +1272,40 @@ class nsZenWindowSync {
       return;
     }
     tab._zenContentsVisible = true;
-    tab.id = this.#newTabSyncId;
+    // Only assign a new sync ID if one isn't already set.  A pre-existing id
+    // means the tab came from an external source (e.g. Firefox Sync) and its
+    // zenSyncId must be preserved so other devices can recognise it.
+    if (!tab.id) {
+      tab.id = this.#newTabSyncId;
+      if (tab.pinned && !isUnsyncedWindow) {
+        lazy.ZenSessionStore.setSyncMetaNew("tabs", tab.id);
+      }
+    }
     if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
+      return;
+    }
+    // Folder placeholder tabs are created by on_TabGroupCreate in other windows;
+    // mirroring them here would create a duplicate placeholder inside the folder.
+    if (duringPinning && tab.hasAttribute("zen-empty-tab") && tab.group?.isZenFolder) {
       return;
     }
     if (isUnsyncedWindow || !lazy.gWindowSyncEnabled) {
       return;
     }
     this.#runOnAllWindows(window, win => {
+      // If a tab with this id already exists in the other window (e.g. it was
+      // placed there by Firefox Sync before ZenWindowSync ran), sync its
+      // attributes/position instead of creating a duplicate.
+      const existingTab = tab.id ? this.getItemFromWindow(win, tab.id) : null;
+      if (existingTab) {
+        this.#syncItemWithOriginal(
+          tab,
+          existingTab,
+          win,
+          SYNC_FLAG_ICON | SYNC_FLAG_LABEL | SYNC_FLAG_MOVE
+        );
+        return;
+      }
       const newTab = win.gBrowser.addTrustedTab("about:blank", {
         animate: true,
         createLazyBrowser: true,
@@ -1393,6 +1419,9 @@ class nsZenWindowSync {
   on_TabClose(aEvent) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
+    if (tab.id) {
+      lazy.ZenSessionStore.removeFromSyncMeta("tabs", tab.id);
+    }
     this.#runOnAllWindows(window, win => {
       const targetTab = this.getItemFromWindow(win, tab.id);
       if (targetTab) {
