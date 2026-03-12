@@ -16,7 +16,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   gWindowSyncEnabled: "resource:///modules/zen/ZenWindowSync.sys.mjs",
   gSyncOnlyPinnedTabs: "resource:///modules/zen/ZenWindowSync.sys.mjs",
   DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
-  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.sys.mjs",
+  ContextualIdentityService:
+    "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -91,26 +92,12 @@ export class nsZenSessionManager {
    */
   #deferredBackupTask = null;
   /**
-   * Persistent side-table for sync conflict resolution.
-   * Stored in zen-sessions.jsonlz4 under the "_syncMeta" key.
-   * Shape: { tabs, spaces, folders, containers } keyed by item identifier.
-   *
-   * @type {{tabs: object, spaces: object, folders: object, containers: object}|null}
+   * Snapshot of item hashes from the last saveState() cycle, used
+   * to detect per-item changes for the multi-record sync engine.
+   * Shape: { spaces: Map<uuid,hash>, tabs: Map<zenSyncId,hash>,
+   *          folders: Map<id,hash>, metaHash: string }
    */
-  #syncMetaStore = null;
-  /**
-   * Items pulled from sync that haven't yet been created in the live browser.
-   * Applied on top of every saveState() collection so they aren't dropped.
-   * Set to null by applySyncData() after the DOM update completes.
-   *
-   * @type {{spaces: Array, tabs: Array, folders: Array, groups: Array, splitViewData: Array}|null}
-   */
-  #pendingItems = null;
-  /**
-   * Set to true while applySyncData() is running so that observer callbacks
-   * and saveWorkspace() skip marking sync-applied items as 'new'/'modified'.
-   */
-  #insideSyncOperation = false;
+  _lastSnapshot = null;
 
   init() {
     this.log("Initializing session manager");
@@ -127,41 +114,6 @@ export class nsZenSessionManager {
     this.#deferredBackupTask = new lazy.DeferredTask(async () => {
       await this.#createBackupsIfNeeded();
     }, REGENERATION_DEBOUNCE_RATE_MS);
-
-    // Observe container lifecycle so we can keep syncMeta up to date.
-    Services.obs.addObserver(this, "contextual-identity-created");
-    Services.obs.addObserver(this, "contextual-identity-updated");
-    Services.obs.addObserver(this, "contextual-identity-deleted");
-  }
-
-  /**
-   * Observer callback for container (contextual identity) lifecycle events.
-   * Skipped when inside a sync operation to avoid marking sync-applied
-   * containers as 'new'.
-   */
-  observe(subject, topic) {
-    if (this.#insideSyncOperation) {
-      return;
-    }
-    try {
-      const identity = subject?.wrappedJSObject;
-      if (!identity?.userContextId) {
-        return;
-      }
-      const key = String(identity.userContextId);
-      if (topic === "contextual-identity-created") {
-        this.#setSyncMeta("containers", key, "new");
-      } else if (topic === "contextual-identity-updated") {
-        const current = this.#getSyncMeta("containers", key);
-        if (current.syncStatus !== "new") {
-          this.#setSyncMeta("containers", key, "modified");
-        }
-      } else if (topic === "contextual-identity-deleted") {
-        this.removeFromSyncMeta("containers", key);
-      }
-    } catch (e) {
-      /* ignore errors parsing container identity */
-    }
   }
 
   log(...args) {
@@ -177,212 +129,6 @@ export class nsZenSessionManager {
 
   get #backupFolderPath() {
     return PathUtils.join(PathUtils.profileDir, "zen-sessions-backup");
-  }
-
-  // ---------------------------------------------------------------------------
-  // _syncMeta accessors
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Returns the live syncMeta object, initializing it if absent.
-   * Shape: { tabs, spaces, folders, containers } — each keyed by item identifier.
-   */
-  get #syncMeta() {
-    if (!this.#syncMetaStore) {
-      this.#syncMetaStore = { tabs: {}, spaces: {}, folders: {}, containers: {} };
-    }
-    return this.#syncMetaStore;
-  }
-
-  /**
-   * Returns the syncMeta entry for a given type+key, defaulting to
-   * { syncStatus: 'new', modifiedAt: 0 } if absent (correct for first sync).
-   */
-  #getSyncMeta(type, key) {
-    return this.#syncMeta[type]?.[key] ?? { syncStatus: "new", modifiedAt: 0 };
-  }
-
-  /**
-   * Sets the syncMeta entry for a given type+key.
-   */
-  #setSyncMeta(type, key, syncStatus, modifiedAt = Date.now()) {
-    const meta = this.#syncMeta;
-    if (!meta[type]) {
-      meta[type] = {};
-    }
-    meta[type][key] = { syncStatus, modifiedAt };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Public syncMeta API (called from ZenWorkspaces, ZenWindowSync, ZenFolders)
-  // ---------------------------------------------------------------------------
-
-  setSyncMetaNew(type, key) {
-    if (this.#insideSyncOperation) return;
-    this.#setSyncMeta(type, String(key), "new");
-  }
-
-  setSyncMetaModified(type, key) {
-    if (this.#insideSyncOperation) return;
-    this.#setSyncMeta(type, String(key), "modified");
-  }
-
-  /**
-   * Removes the syncMeta entry and also clears it from #pendingItems so
-   * the overlay doesn't re-add a deliberately deleted item.
-   */
-  removeFromSyncMeta(type, key) {
-    const sKey = String(key);
-    const meta = this.#syncMeta;
-    if (meta[type]) {
-      delete meta[type][sKey];
-    }
-    // Also purge from pendingItems to prevent overlay re-adding it.
-    if (this.#pendingItems) {
-      if (type === "spaces") {
-        this.#pendingItems.spaces = (this.#pendingItems.spaces || []).filter(
-          (s) => s.uuid !== sKey
-        );
-      } else if (type === "tabs") {
-        this.#pendingItems.tabs = (this.#pendingItems.tabs || []).filter(
-          (t) => t.zenSyncId !== sKey
-        );
-      } else if (type === "folders") {
-        this.#pendingItems.folders = (this.#pendingItems.folders || []).filter(
-          (f) => String(f.id) !== sKey
-        );
-      }
-    }
-  }
-
-  /**
-   * Marks all known items as 'synced'. Called from ZenWorkspacesEngine._syncFinish()
-   * after a successful push so future reconcile correctly identifies deletions.
-   */
-  markAllItemsSynced() {
-    const meta = this.#syncMeta;
-    const now = Date.now();
-    for (const type of ["tabs", "spaces", "folders", "containers"]) {
-      if (!meta[type]) {
-        continue;
-      }
-      for (const key of Object.keys(meta[type])) {
-        meta[type][key] = { syncStatus: "synced", modifiedAt: meta[type][key].modifiedAt || now };
-      }
-    }
-    // Ensure all tabs with zenSyncId are tracked in syncMeta
-    const sidebar = this.#sidebar;
-    if (!meta.tabs) {
-      meta.tabs = {};
-    }
-    for (const tab of sidebar?.tabs || []) {
-      if (tab.zenSyncId && !meta.tabs[tab.zenSyncId]) {
-        meta.tabs[tab.zenSyncId] = { syncStatus: "synced", modifiedAt: now };
-      }
-    }
-    // Persist
-    this.#file.data = { ...sidebar, _syncMeta: meta };
-    this.#file.saveSoon();
-  }
-
-  /**
-   * Returns a snapshot of syncMeta keyed by type, for use in createRecord().
-   * Returns plain objects (not live references).
-   */
-  getSyncMetaSnapshot() {
-    return JSON.parse(JSON.stringify(this.#syncMeta));
-  }
-
-  // ---------------------------------------------------------------------------
-  // Reconcile pure functions
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Produces per-item sync actions from local state + syncMeta + remote state.
-   * Pure function — no side effects.
-   *
-   * @param {Array}  localItems   — local array (spaces, pinnedTabs, folders, or containers)
-   * @param {object} syncMetaMap  — syncMeta[type] keyed by item key (string)
-   * @param {Array}  remoteItems  — items from incoming sync payload
-   * @param {string} keyField     — 'uuid' | 'zenSyncId' | 'id' | 'userContextId'
-   * @param {string} type         — for conflict strategy ('spaces' = keepLocal on modified+absent, others = deleteLocal)
-   * @returns {Array<{action:'noop'|'pull'|'deleteLocal', local:object|null, remote:object|null}>}
-   */
-  static reconcile(localItems, syncMetaMap, remoteItems, keyField, type) {
-    const remoteMap = new Map(
-      (remoteItems || []).filter((i) => i[keyField] != null).map((i) => [String(i[keyField]), i])
-    );
-    const actions = [];
-
-    // Process all local items
-    for (const local of localItems || []) {
-      const key = local[keyField] != null ? String(local[keyField]) : null;
-      if (!key) {
-        // No key → always keep local (can't reconcile)
-        actions.push({ action: "noop", local, remote: null });
-        continue;
-      }
-      const meta = syncMetaMap?.[key] ?? { syncStatus: "new", modifiedAt: 0 };
-      const remote = remoteMap.get(key);
-
-      if (!remote) {
-        // Not in remote
-        if (meta.syncStatus === "new") {
-          actions.push({ action: "noop", local, remote: null }); // Local-only, will be pushed
-        } else if (meta.syncStatus === "synced") {
-          actions.push({ action: "deleteLocal", local, remote: null }); // Deleted elsewhere
-        } else {
-          // modified + absent from remote
-          if (type === "spaces") {
-            actions.push({ action: "noop", local, remote: null }); // keepLocal for spaces
-          } else {
-            actions.push({ action: "deleteLocal", local, remote: null });
-          }
-        }
-      } else {
-        // Present in remote
-        if ((remote.modifiedAt || 0) > (meta.modifiedAt || 0)) {
-          actions.push({ action: "pull", local, remote }); // Remote is newer
-        } else {
-          actions.push({ action: "noop", local, remote }); // Local is same or newer
-        }
-        remoteMap.delete(key); // Mark as processed
-      }
-    }
-
-    // Remote items not present locally → pull them in
-    for (const [, remote] of remoteMap) {
-      actions.push({ action: "pull", local: null, remote });
-    }
-
-    return actions;
-  }
-
-  /**
-   * Applies reconcile() output to produce new state.
-   * @param {Array} actions  Output of reconcile()
-   * @returns {{ merged: Array, pulled: Array, deleted: Array }}
-   */
-  static applyReconcileActions(actions) {
-    const merged = [];
-    const pulled = [];
-    const deleted = [];
-
-    for (const { action, local, remote } of actions) {
-      if (action === "noop") {
-        merged.push(local);
-      } else if (action === "pull") {
-        // Merge remote on top of local (if local exists), otherwise just use remote
-        const item = local ? { ...local, ...remote } : remote;
-        merged.push(item);
-        pulled.push(item);
-      } else if (action === "deleteLocal") {
-        deleted.push(local);
-        // Don't add to merged — item is removed
-      }
-    }
-
-    return { merged, pulled, deleted };
   }
 
   async #getBackupRecoveryOrder() {
@@ -544,10 +290,6 @@ export class nsZenSessionManager {
       console.error("ZenSessionManager: Failed to read session file", e);
     }
     const rawData = this._dataFromFile || {};
-    // Extract _syncMeta from file data and keep separately; don't store it in the sidebar object.
-    if (rawData._syncMeta) {
-      this.#syncMetaStore = rawData._syncMeta;
-    }
     const { _syncMeta: _ignored, ...sidebarData } = rawData;
     this.#sidebar = sidebarData;
     if (!this.#sidebar.spaces?.length && !this._shouldRunMigration) {
@@ -857,22 +599,9 @@ export class nsZenSessionManager {
       }
     );
     this.#collectWindowData(windows);
-    // Detect relevant workspace changes and notify the sync engine.
-    const _relevantHash = JSON.stringify({
-      s: this.#sidebar.spaces,
-      t: (this.#sidebar.tabs || []).filter((t) => t.pinned),
-      f: this.#sidebar.folders,
-    });
-    if (_relevantHash !== this._lastZenWorkspaceHash) {
-      this._lastZenWorkspaceHash = _relevantHash;
-      Services.obs.notifyObservers(null, "zen-workspace-state-changed");
-    }
-    // This would save the data to disk asynchronously or when quitting the app.
-    // Include _syncMeta in the file data so it persists across restarts.
+    this.#notifyChangedItems(this.#sidebar);
     let sidebar = this.#sidebar;
-    this.#file.data = this.#syncMetaStore
-      ? { ...sidebar, _syncMeta: this.#syncMetaStore }
-      : sidebar;
+    this.#file.data = sidebar;
     if (soon) {
       this.#file.saveSoon();
     } else {
@@ -988,41 +717,6 @@ export class nsZenSessionManager {
 
     sidebarData.lastCollected = Date.now();
     this.#collectTabsData(sidebarData, aStateWindows);
-
-    // Re-apply pending items so that items not yet created in the live
-    // browser (e.g. a workspace received from sync that hasn't been rendered
-    // yet) survive this saveState() cycle and aren't silently dropped.
-    // The overlay keeps merging until applySyncData() sets
-    // this.#pendingItems = null after the DOM update completes.
-    if (this.#pendingItems) {
-      if (this.#pendingItems.spaces?.length) {
-        sidebarData.spaces = this.#mergeByKey(
-          sidebarData.spaces || [],
-          this.#pendingItems.spaces,
-          "uuid"
-        );
-      }
-      if (this.#pendingItems.tabs?.length) {
-        sidebarData.tabs = this.#mergeTabs(sidebarData.tabs || [], this.#pendingItems.tabs);
-      }
-      if (this.#pendingItems.splitViewData?.length) {
-        sidebarData.splitViewData = this.#pendingItems.splitViewData;
-      }
-      if (this.#pendingItems.folders?.length) {
-        sidebarData.folders = this.#mergeByKey(
-          sidebarData.folders || [],
-          this.#pendingItems.folders,
-          "id"
-        );
-      }
-      if (this.#pendingItems.groups?.length) {
-        sidebarData.groups = this.#mergeByKey(
-          sidebarData.groups || [],
-          this.#pendingItems.groups,
-          "id"
-        );
-      }
-    }
 
     this.#sidebar = sidebarData;
   }
@@ -1226,7 +920,6 @@ export class nsZenSessionManager {
   /**
    * Returns a deep clone of the full sidebar object (spaces, tabs, folders, etc.).
    * Used by the ZenWorkspacesSync engine to build the sync payload.
-   * Does NOT include _syncMeta (never sent outbound).
    *
    * @returns {object} A deep clone of the sidebar data.
    */
@@ -1239,44 +932,26 @@ export class nsZenSessionManager {
   }
 
   /**
-   * Applies incoming sync data using conflict-resolution via syncMeta.
-   * Reconciles each item type, updates local state, persists to disk,
-   * and notifies all windows of the changes.
+   * Applies incoming sync data. Called by the ZenWorkspacesStore
+   * after classifying all incoming records by type.
    *
-   * @param {{ spaces: Array, tabs: Array, folders: Array, groups: Array, splitViewData: Array, containers: Array }} data
+   * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} pulled
+   * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} removals
+   * @param {{ groups: Array, splitViewData: Array }|null} meta
    */
-  async applySyncData(data) {
-    this.#insideSyncOperation = true;
+  async applyMultiRecordSync(pulled, removals, meta) {
     try {
-      if (!data) {
-        return;
-      }
-
       let sidebar = { ...this.#sidebar };
-      const syncMeta = this.#syncMeta;
 
-      // 1. Reconcile containers first (so IDs exist before tabs reference them)
-      const localContainers = lazy.ContextualIdentityService.getPublicIdentities().map((c) => ({
-        userContextId: c.userContextId,
-        name: c.name,
-        icon: c.icon,
-        color: c.color,
-      }));
-      const containerActions = nsZenSessionManager.reconcile(
-        localContainers,
-        syncMeta.containers || {},
-        data.containers || [],
-        "userContextId",
-        "containers"
-      );
-      const containerResult = nsZenSessionManager.applyReconcileActions(containerActions);
-
-      for (const container of containerResult.pulled) {
+      // 1. Apply container changes via ContextualIdentityService
+      const localContainers =
+        lazy.ContextualIdentityService.getPublicIdentities();
+      for (const container of pulled.containers || []) {
         if (!container.name) {
           continue;
         }
         const existsLocally = localContainers.some(
-          (c) => String(c.userContextId) === String(container.userContextId)
+          c => String(c.userContextId) === String(container.userContextId)
         );
         if (existsLocally) {
           lazy.ContextualIdentityService.update(
@@ -1293,14 +968,8 @@ export class nsZenSessionManager {
             container.userContextId
           );
         }
-        this.#setSyncMeta(
-          "containers",
-          String(container.userContextId),
-          "synced",
-          container.modifiedAt || 0
-        );
       }
-      for (const container of containerResult.deleted) {
+      for (const container of removals.containers || []) {
         try {
           lazy.ContextualIdentityService.remove(container.userContextId);
         } catch (e) {
@@ -1308,204 +977,265 @@ export class nsZenSessionManager {
         }
       }
 
-      // 2. Reconcile spaces
-      const spaceActions = nsZenSessionManager.reconcile(
-        sidebar.spaces || [],
-        syncMeta.spaces || {},
-        data.spaces || [],
-        "uuid",
-        "spaces"
+      // 2. Remove deleted items from sidebar arrays
+      const removedSpaceIds = new Set((removals.spaces || []).map(s => s.uuid));
+      const removedTabIds = new Set(
+        (removals.tabs || []).map(t => t.zenSyncId)
       );
-      const spaceResult = nsZenSessionManager.applyReconcileActions(spaceActions);
-      sidebar.spaces = spaceResult.merged;
-      for (const space of spaceResult.pulled) {
-        this.#setSyncMeta("spaces", space.uuid, "synced", space.modifiedAt || 0);
-      }
-
-      // 3. Reconcile ALL tabs with zenSyncId
-      const localTracked = (sidebar.tabs || []).filter((t) => t.zenSyncId);
-      const localNoId = (sidebar.tabs || []).filter((t) => !t.zenSyncId);
-      const tabActions = nsZenSessionManager.reconcile(
-        localTracked,
-        syncMeta.tabs || {},
-        data.tabs || [],
-        "zenSyncId",
-        "tabs"
+      const removedFolderIds = new Set(
+        (removals.folders || []).map(f => String(f.id))
       );
-      const tabResult = nsZenSessionManager.applyReconcileActions(tabActions);
-      sidebar.tabs = [...localNoId, ...tabResult.merged];
-      for (const tab of tabResult.pulled) {
-        this.#setSyncMeta("tabs", tab.zenSyncId, "synced", tab.modifiedAt || 0);
+      if (removedSpaceIds.size) {
+        sidebar.spaces = (sidebar.spaces || []).filter(
+          s => !removedSpaceIds.has(s.uuid)
+        );
+      }
+      if (removedTabIds.size) {
+        sidebar.tabs = (sidebar.tabs || []).filter(
+          t => !removedTabIds.has(t.zenSyncId)
+        );
+      }
+      if (removedFolderIds.size) {
+        sidebar.folders = (sidebar.folders || []).filter(
+          f => !removedFolderIds.has(String(f.id))
+        );
       }
 
-      // 4. Reconcile folders
-      const folderActions = nsZenSessionManager.reconcile(
-        sidebar.folders || [],
-        syncMeta.folders || {},
-        data.folders || [],
-        "id",
-        "folders"
-      );
-      const folderResult = nsZenSessionManager.applyReconcileActions(folderActions);
-      sidebar.folders = folderResult.merged;
-      for (const folder of folderResult.pulled) {
-        this.#setSyncMeta("folders", String(folder.id), "synced", folder.modifiedAt || 0);
+      // 3. Merge pulled items into sidebar arrays
+      if (pulled.spaces?.length) {
+        const spaceMap = new Map((sidebar.spaces || []).map(s => [s.uuid, s]));
+        for (const space of pulled.spaces) {
+          if (!space.uuid) {
+            continue;
+          }
+          const existing = spaceMap.get(space.uuid);
+          spaceMap.set(
+            space.uuid,
+            existing ? { ...existing, ...space } : space
+          );
+        }
+        sidebar.spaces = Array.from(spaceMap.values());
+        // Sort spaces by the position field from the sync payload
+        sidebar.spaces.sort(
+          (a, b) => (a.position ?? Infinity) - (b.position ?? Infinity)
+        );
       }
 
-      // 5. Groups — simple merge, no conflict tracking
-      if (data.groups?.length) {
-        sidebar.groups = this.#mergeByKey(sidebar.groups || [], data.groups, "id");
+      if (pulled.tabs?.length) {
+        const tabMap = new Map();
+        const noIdTabs = [];
+        for (const tab of sidebar.tabs || []) {
+          if (tab.zenSyncId) {
+            tabMap.set(tab.zenSyncId, tab);
+          } else {
+            noIdTabs.push(tab);
+          }
+        }
+        for (const tab of pulled.tabs) {
+          if (!tab.zenSyncId) {
+            continue;
+          }
+          const existing = tabMap.get(tab.zenSyncId);
+          tabMap.set(tab.zenSyncId, existing ? { ...existing, ...tab } : tab);
+        }
+        sidebar.tabs = [...noIdTabs, ...tabMap.values()];
       }
 
-      // 5b. splitViewData — simple replacement (items lack a stable key)
-      if (data.splitViewData?.length) {
-        sidebar.splitViewData = data.splitViewData;
+      if (pulled.folders?.length) {
+        const folderMap = new Map(
+          (sidebar.folders || []).map(f => [String(f.id), f])
+        );
+        for (const folder of pulled.folders) {
+          if (!folder.id) {
+            continue;
+          }
+          const existing = folderMap.get(String(folder.id));
+          folderMap.set(
+            String(folder.id),
+            existing ? { ...existing, ...folder } : folder
+          );
+        }
+        sidebar.folders = Array.from(folderMap.values());
       }
 
-      // 6. Persist (include _syncMeta in file data)
+      // 4. Apply meta if present (replace groups and splitViewData)
+      if (meta) {
+        sidebar.groups = meta.groups;
+        sidebar.splitViewData = meta.splitViewData;
+      }
+
+      // 5. Persist sidebar to disk
       this.#sidebar = sidebar;
-      this.#file.data = { ...sidebar, _syncMeta: syncMeta };
+      this.#file.data = sidebar;
       this.#file.saveSoon();
 
-      // 7. Build pending items from pulled results (items not yet in live browser)
-      const pending = {
-        spaces: spaceResult.pulled,
-        tabs: tabResult.pulled,
-        folders: folderResult.pulled,
-        groups: data.groups || [],
-        splitViewData: data.splitViewData || [],
-      };
-      const hasPending = Object.values(pending).some((a) => a.length > 0);
-      if (hasPending) {
-        this.#pendingItems = this.#pendingItems
-          ? {
-              spaces: this.#mergeByKey(this.#pendingItems.spaces || [], pending.spaces, "uuid"),
-              tabs: this.#mergeTabs(this.#pendingItems.tabs || [], pending.tabs),
-              folders: this.#mergeByKey(this.#pendingItems.folders || [], pending.folders, "id"),
-              groups: this.#mergeByKey(this.#pendingItems.groups || [], pending.groups, "id"),
-              splitViewData: pending.splitViewData,
-            }
-          : pending;
-      }
+      // Rebuild the snapshot so the next saveState() diff doesn't
+      // re-fire notifications for items we just applied from sync.
+      this._lastSnapshot = this.#buildSnapshot(sidebar);
 
-      // 8. Build pulled and removals from reconcile results
-      const pulled = {
-        spaces: spaceResult.pulled,
-        tabs: tabResult.pulled,
-        folders: folderResult.pulled,
-      };
-      const removals = {
-        spaces: spaceResult.deleted,
-        tabs: tabResult.deleted,
-        folders: folderResult.deleted,
-        containers: containerResult.deleted,
-      };
-
-      // 9. Dispatch live changes to ONE window; ZenWindowSync propagates to others.
+      // 6. Dispatch to ONE window for live DOM updates
       const win = Services.wm.getMostRecentWindow("navigator:browser");
       if (win?.gZenWorkspaces && !win.gZenWorkspaces.privateWindowOrDisabled) {
         await win.gZenWorkspaces._applySyncChanges(pulled, removals);
-        this.#pendingItems = null; // DOM updated, pending overlay no longer needed
       }
 
-      this.log("Applied sync data with conflict resolution");
+      this.log("Applied multi-record sync data");
     } catch (e) {
-      console.error("ZenSessionManager: Failed to apply sync data:", e);
-    } finally {
-      this.#insideSyncOperation = false;
+      console.error(
+        "ZenSessionManager: Failed to apply multi-record sync data:",
+        e
+      );
     }
   }
 
-  /**
-   * Merges two arrays of objects by a string key.
-   * Incoming items update existing local items or are appended if new.
-   * Local items not present in incoming are preserved unchanged.
-   *
-   * @param {Array} local     Local items.
-   * @param {Array} incoming  Incoming items from sync.
-   * @param {string} key      Property name to use as the unique key.
-   * @returns {Array}
-   */
-  #mergeByKey(local, incoming, key) {
-    let localMap = new Map(local.map((item) => [item[key], item]));
-    for (let item of incoming) {
-      if (!item[key]) {
-        continue;
-      }
-      let existing = localMap.get(item[key]);
-      localMap.set(item[key], existing ? { ...existing, ...item } : item);
-    }
-    return Array.from(localMap.values());
-  }
+  // Runtime-only tab fields excluded from sync hashing (mirrors STRIP_TAB_FIELDS
+  // in ZenWorkspacesSync plus lastAccessed which changes on every tab switch).
+  static #HASH_STRIP_TAB_FIELDS = [
+    "syncStatus",
+    "scroll",
+    "formdata",
+    "selected",
+    "_zenIsActiveTab",
+    "_zenContentsVisible",
+    "_zenChangeLabelFlag",
+    "lastAccessed",
+  ];
 
   /**
-   * Merges an array of incoming synced tabs into the local tab list.
+   * Builds a snapshot of per-item hashes from the current sidebar state.
+   * Only sync-relevant fields are included so that runtime-only changes
+   * (scroll position, formdata, etc.) don't trigger spurious notifications.
    *
-   * For each incoming tab (pinned or unpinned):
-   *   - If a local tab with the same zenSyncId exists, its sync-portable
-   *     metadata is updated while local browsing state is preserved.
-   *   - If no local match exists, the tab is appended.
-   *
-   * Local tabs without a zenSyncId are always preserved without modification.
-   *
-   * @param {Array} localTabs       Full local tab list.
-   * @param {Array} incomingTabs    Tabs from the sync payload.
-   * @returns {Array}
+   * @param {object} sidebar - The sidebar data to snapshot.
+   * @returns {{ spaces: Map, tabs: Map, folders: Map, metaHash: string }}
    */
-  #mergeTabs(localTabs, incomingTabs) {
-    let localById = new Map();
-    let localNoId = [];
-
-    for (let tab of localTabs) {
-      if (tab.zenSyncId) {
-        localById.set(tab.zenSyncId, tab);
-      } else {
-        localNoId.push(tab);
+  #buildSnapshot(sidebar) {
+    const spaces = new Map();
+    const spaceList = sidebar.spaces || [];
+    for (let i = 0; i < spaceList.length; i++) {
+      const s = spaceList[i];
+      if (s.uuid) {
+        // Include array index so reordering is detected.
+        spaces.set(s.uuid, JSON.stringify({ ...s, _pos: i }));
       }
     }
 
-    let merged = new Map(localById);
-    for (let incoming of incomingTabs) {
-      let id = incoming.zenSyncId;
-      if (!id) {
-        continue;
-      }
-
-      let existing = localById.get(id);
-      if (existing) {
-        if (existing.pinned) {
-          // Pinned tab: update sync-portable metadata, preserve session state
-          merged.set(id, {
-            ...existing,
-            groupId: incoming.groupId ?? existing.groupId,
-            zenWorkspace: incoming.zenWorkspace ?? existing.zenWorkspace,
-            zenEssential: incoming.zenEssential ?? existing.zenEssential,
-            zenStaticLabel: incoming.zenStaticLabel ?? existing.zenStaticLabel,
-            zenHasStaticIcon: incoming.zenHasStaticIcon ?? existing.zenHasStaticIcon,
-            zenDefaultUserContextId:
-              incoming.zenDefaultUserContextId ?? existing.zenDefaultUserContextId,
-            zenPinnedIcon: incoming.zenPinnedIcon ?? existing.zenPinnedIcon,
-            _zenPinnedInitialState:
-              incoming._zenPinnedInitialState ?? existing._zenPinnedInitialState,
-          });
-        } else {
-          // Unpinned tab: update sync-portable metadata, preserve browsing state
-          merged.set(id, {
-            ...existing,
-            zenWorkspace: incoming.zenWorkspace ?? existing.zenWorkspace,
-            groupId: incoming.groupId ?? existing.groupId,
-            userContextId: incoming.userContextId ?? existing.userContextId,
-            hidden: incoming.hidden ?? existing.hidden,
-            zenIsEmpty: incoming.zenIsEmpty ?? existing.zenIsEmpty,
-            zenLiveFolderItemId: incoming.zenLiveFolderItemId ?? existing.zenLiveFolderItemId,
-          });
+    const tabs = new Map();
+    const tabList = sidebar.tabs || [];
+    for (let i = 0; i < tabList.length; i++) {
+      const t = tabList[i];
+      if (t.zenSyncId && !(t.zenIsEmpty && !t.groupId)) {
+        const cleaned = { ...t };
+        for (const field of nsZenSessionManager.#HASH_STRIP_TAB_FIELDS) {
+          delete cleaned[field];
         }
-      } else {
-        merged.set(id, incoming);
+        // Include array index so reordering is detected.
+        cleaned._pos = i;
+        tabs.set(t.zenSyncId, JSON.stringify(cleaned));
       }
     }
 
-    return [...localNoId, ...merged.values()];
+    const folders = new Map();
+    for (const f of sidebar.folders || []) {
+      if (f.id) {
+        const { syncStatus: _s, ...rest } = f;
+        folders.set(String(f.id), JSON.stringify(rest));
+      }
+    }
+
+    const metaHash = JSON.stringify({
+      g: sidebar.groups || [],
+      sv: sidebar.splitViewData || [],
+    });
+
+    return { spaces, tabs, folders, metaHash };
+  }
+
+  /**
+   * Computes per-item hashes and fires "zen-workspace-item-changed" notifications
+   * for items that have changed, been added, or been removed since the last snapshot.
+   *
+   * @param sidebar
+   */
+  #notifyChangedItems(sidebar) {
+    const snapshot = this.#buildSnapshot(sidebar);
+    const prev = this._lastSnapshot;
+
+    if (prev) {
+      // Detect changed/new spaces
+      for (const [uuid, hash] of snapshot.spaces) {
+        if (prev.spaces.get(uuid) !== hash) {
+          Services.obs.notifyObservers(
+            null,
+            "zen-workspace-item-changed",
+            `s~${uuid}`
+          );
+        }
+      }
+      // Detect removed spaces
+      for (const uuid of prev.spaces.keys()) {
+        if (!snapshot.spaces.has(uuid)) {
+          Services.obs.notifyObservers(
+            null,
+            "zen-workspace-item-changed",
+            `s~${uuid}`
+          );
+        }
+      }
+
+      // Detect changed/new tabs
+      for (const [id, hash] of snapshot.tabs) {
+        if (prev.tabs.get(id) !== hash) {
+          Services.obs.notifyObservers(
+            null,
+            "zen-workspace-item-changed",
+            `t~${id}`
+          );
+        }
+      }
+      // Detect removed tabs
+      for (const id of prev.tabs.keys()) {
+        if (!snapshot.tabs.has(id)) {
+          Services.obs.notifyObservers(
+            null,
+            "zen-workspace-item-changed",
+            `t~${id}`
+          );
+        }
+      }
+
+      // Detect changed/new folders
+      for (const [id, hash] of snapshot.folders) {
+        if (prev.folders.get(id) !== hash) {
+          Services.obs.notifyObservers(
+            null,
+            "zen-workspace-item-changed",
+            `f~${id}`
+          );
+        }
+      }
+      // Detect removed folders
+      for (const id of prev.folders.keys()) {
+        if (!snapshot.folders.has(id)) {
+          Services.obs.notifyObservers(
+            null,
+            "zen-workspace-item-changed",
+            `f~${id}`
+          );
+        }
+      }
+
+      // Detect meta changes
+      if (prev.metaHash !== snapshot.metaHash) {
+        Services.obs.notifyObservers(
+          null,
+          "zen-workspace-item-changed",
+          "meta~global"
+        );
+      }
+    }
+
+    this._lastSnapshot = snapshot;
   }
 }
 

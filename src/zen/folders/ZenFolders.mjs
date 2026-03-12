@@ -4,11 +4,6 @@
 
 import { nsZenDOMOperatedFeature } from "chrome://browser/content/zen-components/ZenCommonUtils.mjs";
 
-const lazy = {};
-ChromeUtils.defineESModuleGetters(lazy, {
-  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
-});
-
 function formatRelativeTime(timestamp) {
   const now = Date.now();
 
@@ -241,7 +236,11 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     }
     // Mark tab as modified for sync when its folder membership changes.
     if (tab.id && group?.isZenFolder) {
-      lazy.ZenSessionStore.setSyncMetaModified("tabs", tab.id);
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `t~${tab.id}`
+      );
     }
     group.pinned = tab.pinned;
     const isActiveFolder = group?.activeGroups?.length > 0;
@@ -340,7 +339,11 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     const group = event.target;
     // Mark tab as modified for sync when its folder membership changes.
     if (tab.id && group?.isZenFolder) {
-      lazy.ZenSessionStore.setSyncMetaModified("tabs", tab.id);
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `t~${tab.id}`
+      );
     }
     if (
       group.hasAttribute("split-view-group") &&
@@ -569,13 +572,15 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
         ? workspacePinned
         : gZenWorkspaces.pinnedTabsContainer;
     const insertBefore =
-      options.insertBefore || pinnedContainer.querySelector(".pinned-tabs-container-separator");
+      options.insertBefore ||
+      pinnedContainer.querySelector(".pinned-tabs-container-separator");
 
     if (!options.skipEmptyTab) {
       const emptyTab = gBrowser.addTab("about:blank", {
         skipAnimation: true,
         pinned: true,
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        triggeringPrincipal:
+          Services.scriptSecurityManager.getSystemPrincipal(),
         _forZenEmptyTab: true,
         createLazyBrowser: true,
       });
@@ -615,7 +620,11 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
 
     this.#groupInit(folder);
     if (folder.id) {
-      lazy.ZenSessionStore.setSyncMetaNew("folders", folder.id);
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `f~${folder.id}`
+      );
     }
     return folder;
   }

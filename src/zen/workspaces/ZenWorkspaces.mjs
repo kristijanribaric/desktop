@@ -181,14 +181,18 @@ class nsZenWorkspaces {
    * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} removals  Items to remove.
    */
   async _applySyncChanges(pulled, removals = {}) {
-    if (!this.shouldHaveWorkspaces || this.privateWindowOrDisabled) return;
+    if (!this.shouldHaveWorkspaces || this.privateWindowOrDisabled) {
+      return;
+    }
     await this.promiseInitialized;
 
     // 1. Update workspace cache (remove deleted, merge pulled)
-    const removedSpaceIds = new Set((removals.spaces || []).map((s) => s.uuid));
+    const removedSpaceIds = new Set((removals.spaces || []).map(s => s.uuid));
     if (removedSpaceIds.size || pulled.spaces?.length) {
       const localMap = new Map(
-        this._workspaceCache.filter((w) => !removedSpaceIds.has(w.uuid)).map((w) => [w.uuid, w])
+        this._workspaceCache
+          .filter(w => !removedSpaceIds.has(w.uuid))
+          .map(w => [w.uuid, w])
       );
       for (const space of pulled.spaces || []) {
         const existing = localMap.get(space.uuid);
@@ -270,7 +274,7 @@ class nsZenWorkspaces {
 
     const incomingFolders = pulled.folders || [];
     // Filter out folder placeholder tabs — they should never be synced.
-    const incomingTabs = (pulled.tabs || []).filter((t) => !t.zenIsEmpty);
+    const incomingTabs = (pulled.tabs || []).filter(t => !t.zenIsEmpty);
 
     if (!incomingFolders.length && !incomingTabs.length) {
       return;
@@ -284,13 +288,21 @@ class nsZenWorkspaces {
       const existing = document.getElementById(folderData.id);
       if (existing?.isZenFolder) {
         // Update existing folder
-        if (folderData.name && existing.label !== folderData.name) existing.label = folderData.name;
-        if (folderData.collapsed !== undefined) existing.collapsed = folderData.collapsed;
-        if (folderData.workspaceId)
+        if (folderData.name && existing.label !== folderData.name) {
+          existing.label = folderData.name;
+        }
+        if (folderData.collapsed !== undefined) {
+          existing.collapsed = folderData.collapsed;
+        }
+        if (folderData.workspaceId) {
           existing.setAttribute("zen-workspace-id", folderData.workspaceId);
-        if (folderData.userIcon !== undefined)
+        }
+        if (folderData.userIcon !== undefined) {
           gZenFolders.setFolderUserIcon(existing, folderData.userIcon);
-        existing.dispatchEvent(new CustomEvent("TabGroupUpdate", { bubbles: true }));
+        }
+        existing.dispatchEvent(
+          new CustomEvent("TabGroupUpdate", { bubbles: true })
+        );
       } else {
         // Create new folder — skip the placeholder empty tab since real tabs
         // will be added in step 2 from the pulled tabs.
@@ -311,19 +323,59 @@ class nsZenWorkspaces {
       }
       const existingTab = document.getElementById(tabData.zenSyncId);
       if (existingTab && gBrowser.isTab(existingTab)) {
-        // Update existing tab (same logic for both pinned and unpinned)
-        if (tabData.zenWorkspace)
-          existingTab.setAttribute("zen-workspace-id", tabData.zenWorkspace);
+        if (
+          tabData.zenWorkspace &&
+          existingTab.getAttribute("zen-workspace-id") !== tabData.zenWorkspace
+        ) {
+          this.moveTabToWorkspace(existingTab, tabData.zenWorkspace);
+        }
+
+        // Essentials state changes.
+        const isCurrentlyEssential = existingTab.hasAttribute("zen-essential");
+        const shouldBeEssential = !!tabData.zenEssential;
+        if (shouldBeEssential && !isCurrentlyEssential) {
+          gZenPinnedTabManager.addToEssentials(existingTab);
+        } else if (!shouldBeEssential && isCurrentlyEssential) {
+          gZenPinnedTabManager.removeEssentials(existingTab, /* unpin */ false);
+        }
+
+        // Pinned state changes (after essentials, since essentials implies pinned).
+        if (
+          tabData.pinned !== undefined &&
+          existingTab.pinned !== tabData.pinned
+        ) {
+          if (tabData.pinned) {
+            gBrowser.pinTab(existingTab);
+          } else {
+            gBrowser.unpinTab(existingTab);
+          }
+        }
+
+        // Group/folder membership.
         const currentGroupId = existingTab.group?.id || null;
         const targetGroupId = tabData.groupId || null;
         if (currentGroupId !== targetGroupId) {
           if (targetGroupId) {
             const folder = document.getElementById(targetGroupId);
-            if (folder?.isZenFolder) folder.addTabs([existingTab]);
+            if (folder?.isZenFolder) {
+              folder.addTabs([existingTab]);
+            }
           } else if (currentGroupId) {
             gBrowser.ungroupTab(existingTab);
           }
         }
+
+        // Visual updates.
+        if (
+          tabData.image &&
+          existingTab.getAttribute("image") !== tabData.image
+        ) {
+          gBrowser.setIcon(existingTab, tabData.image);
+        }
+        if (typeof tabData.zenStaticLabel === "string") {
+          existingTab.zenStaticLabel = tabData.zenStaticLabel;
+        }
+
         continue;
       }
 
@@ -339,14 +391,19 @@ class nsZenWorkspaces {
         // Session index is 1-based; convert to 0-based.
         let pinnedInitialState = tabData._zenPinnedInitialState;
         if (!pinnedInitialState && tabData.entries?.length) {
-          const entryIndex = typeof tabData.index === "number" ? Math.max(0, tabData.index - 1) : 0;
+          const entryIndex =
+            typeof tabData.index === "number"
+              ? Math.max(0, tabData.index - 1)
+              : 0;
           const entry = tabData.entries[entryIndex] ?? tabData.entries[0];
           pinnedInitialState = { entry, image: tabData.image || "" };
         }
 
         // Create the tab unpinned so ZenWindowSync does NOT mirror it yet
         // (with gSyncOnlyPinnedTabs=true it skips unpinned tabs in on_TabOpen).
-        const newTab = gBrowser.addTrustedTab("about:blank", { createLazyBrowser: true });
+        const newTab = gBrowser.addTrustedTab("about:blank", {
+          createLazyBrowser: true,
+        });
 
         // Set the zenSyncId as the DOM id BEFORE pinning.  The guard we added
         // to ZenWindowSync.on_TabOpen (!tab.id) will preserve this id through
@@ -372,7 +429,8 @@ class nsZenWorkspaces {
           // Set visual label and favicon BEFORE pinning so that when
           // ZenWindowSync's on_TabOpen(duringPinning:true) mirrors this tab
           // it copies the correct label/icon to other windows.
-          const label = newTab.zenStaticLabel || pinnedInitialState?.entry?.title || "";
+          const label =
+            newTab.zenStaticLabel || pinnedInitialState?.entry?.title || "";
           if (label) {
             gBrowser._setTabLabel(newTab, label);
           }
@@ -397,7 +455,8 @@ class nsZenWorkspaces {
           // Set visual label and favicon BEFORE pinning so that when
           // ZenWindowSync's on_TabOpen(duringPinning:true) mirrors this tab
           // it copies the correct label/icon to other windows.
-          const label = newTab.zenStaticLabel || pinnedInitialState?.entry?.title || "";
+          const label =
+            newTab.zenStaticLabel || pinnedInitialState?.entry?.title || "";
           if (label) {
             gBrowser._setTabLabel(newTab, label);
           }
@@ -1702,16 +1761,28 @@ class nsZenWorkspaces {
     );
     if (index !== -1) {
       workspacesData[index] = workspaceData;
-      lazy.ZenSessionStore.setSyncMetaModified("spaces", workspaceData.uuid);
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `s~${workspaceData.uuid}`
+      );
     } else {
       workspacesData.push(workspaceData);
-      lazy.ZenSessionStore.setSyncMetaNew("spaces", workspaceData.uuid);
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `s~${workspaceData.uuid}`
+      );
     }
     this.#propagateWorkspaceData();
   }
 
   removeWorkspace(windowID) {
-    lazy.ZenSessionStore.removeFromSyncMeta("spaces", windowID);
+    Services.obs.notifyObservers(
+      null,
+      "zen-workspace-item-changed",
+      `s~${windowID}`
+    );
     let workspacesData = this.getWorkspaces();
     // Remove the workspace from the cache
     workspacesData = workspacesData.filter(
@@ -1859,7 +1930,11 @@ class nsZenWorkspaces {
     if (currentIndex !== newPosition) {
       // Mark all workspaces as modified so the new order is pushed to sync.
       for (const ws of workspaces) {
-        lazy.ZenSessionStore.setSyncMetaModified("spaces", ws.uuid);
+        Services.obs.notifyObservers(
+          null,
+          "zen-workspace-item-changed",
+          `s~${ws.uuid}`
+        );
       }
       this.#propagateWorkspaceData();
     }

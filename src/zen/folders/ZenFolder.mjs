@@ -6,7 +6,6 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   ZenLiveFoldersManager:
     "resource:///modules/zen/ZenLiveFoldersManager.sys.mjs",
-  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
 });
 
 export class nsZenFolder extends MozTabbrowserTabGroup {
@@ -174,7 +173,11 @@ export class nsZenFolder extends MozTabbrowserTabGroup {
 
   async delete() {
     if (this.id) {
-      lazy.ZenSessionStore.removeFromSyncMeta("folders", this.id);
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `f~${this.id}`
+      );
     }
     for (const tab of this.allItemsRecursive) {
       if (tab.hasAttribute("zen-empty-tab")) {
