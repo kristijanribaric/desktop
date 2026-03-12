@@ -1257,8 +1257,8 @@ export class nsZenThemePicker extends nsZenMultiWindowFeature {
     let colorToBlend;
     let colorToBlendOpacity;
     if (this.isMica) {
-      colorToBlend = !this.isDarkMode ? [0, 0, 0] : [255, 255, 255];
-      colorToBlendOpacity = 0.35;
+      colorToBlend = this.isDarkMode ? [0, 0, 0] : [255, 255, 255];
+      colorToBlendOpacity = 0.25;
     } else if (AppConstants.platform === "macosx") {
       colorToBlend = [255, 255, 255];
       colorToBlendOpacity = 0.35;
@@ -1271,7 +1271,7 @@ export class nsZenThemePicker extends nsZenMultiWindowFeature {
           colorToBlendOpacity * (1 - (opacity + lazy.MIN_OPACITY))
       );
       baseColor = this.blendColors(baseColor, colorToBlend, blendedAlpha * 100);
-      if (AppConstants.platform !== "macosx") {
+      if (!this.canBeTransparent) {
         opacity += colorToBlendOpacity * (1 - opacity);
       }
     }
