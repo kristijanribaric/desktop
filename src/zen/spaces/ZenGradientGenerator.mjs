@@ -1438,13 +1438,14 @@ export class nsZenThemePicker extends nsZenMultiWindowFeature {
   }
 
   updateNoise(texture) {
-    document.documentElement.style.setProperty(
-      "--zen-grainy-background-opacity",
-      texture
-    );
-    document.documentElement.setAttribute(
-      "zen-show-grainy-background",
-      texture > 0 ? "true" : "false"
+    [lazy.browserBackgroundElement, lazy.toolbarBackgroundElement].forEach(
+      element => {
+        element.style.setProperty("--zen-grainy-background-opacity", texture);
+        element.setAttribute(
+          "zen-show-grainy-background",
+          texture > 0 ? "true" : "false"
+        );
+      }
     );
   }
 
