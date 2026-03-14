@@ -909,15 +909,19 @@ class nsZenWindowSync {
             }
           );
 
-        let mySrc = await new Promise((r, re) => {
+        let mySrc = await new Promise(r => {
           const reader = new FileReader();
+          if (!browserBlob) {
+            r("");
+            return;
+          }
           reader.readAsDataURL(browserBlob);
           reader.onloadend = function () {
             // result includes identifier 'data:image/png;base64,' plus the base64 data
             r(reader.result);
           };
           reader.onerror = function () {
-            re(new Error("Failed to read blob as data URL"));
+            r("");
           };
         });
 

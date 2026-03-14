@@ -1217,6 +1217,10 @@
       return true;
     }
 
+    _moveTogetherSelectedTabs() {
+      // Override the default behavior of only moving together selected tabs.
+    }
+
     // eslint-disable-next-line complexity
     #applyDragoverIndicator(event, dropElement, movingTabs, draggedTab) {
       // Doesn't show indicator when dragOverSplit
