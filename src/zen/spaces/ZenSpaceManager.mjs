@@ -1493,6 +1493,21 @@ class nsZenWorkspaces {
     await gBrowser.explicitUnloadTabs(tabsToUnload); // TODO: unit test this
   }
 
+  async unloadAllOtherWorkspaces() {
+    const workspaceId =
+      this.#contextMenuData?.workspaceId || this.activeWorkspace;
+
+    const tabsToUnload = this.allStoredTabs.filter(
+      tab =>
+        tab.getAttribute("zen-workspace-id") !== workspaceId &&
+        !tab.hasAttribute("zen-empty-tab") &&
+        !tab.hasAttribute("zen-essential") &&
+        !tab.hasAttribute("pending")
+    );
+
+    await gBrowser.explicitUnloadTabs(tabsToUnload); // TODO: unit test this
+  }
+
   moveTabToWorkspace(tab, workspaceID) {
     return this.moveTabsToWorkspace([tab], workspaceID);
   }
