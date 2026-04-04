@@ -875,10 +875,12 @@ class nsZenWorkspaces {
     };
 
     let removedEmptyTab = false;
+    let initialTabWasEmpty = false;
     if (
       this._initialTab &&
       !(this._initialTab._shouldRemove && this._initialTab._veryPossiblyEmpty)
     ) {
+      initialTabWasEmpty = !!this._initialTab._veryPossiblyEmpty;
       gBrowser.selectedTab = this._initialTab;
       this.moveTabToWorkspace(this._initialTab, this.activeWorkspace);
       gBrowser.moveTabTo(this._initialTab, {
@@ -943,7 +945,12 @@ class nsZenWorkspaces {
       delete this._initialTab;
     }
 
-    showed &&= Services.prefs.getBoolPref("zen.urlbar.open-on-startup", true);
+    const openOnStartup = Services.prefs.getBoolPref(
+      "zen.urlbar.open-on-startup",
+      true
+    );
+    showed &&= openOnStartup;
+    initialTabWasEmpty &&= openOnStartup;
 
     // Wait for the next event loop to ensure that the startup focus logic by
     // firefox has finished doing it's thing.
@@ -951,7 +958,9 @@ class nsZenWorkspaces {
       setTimeout(() => {
         if (gZenVerticalTabsManager._canReplaceNewTab && showed) {
           BrowserCommands.openTab();
-        } else if (!showed) {
+        } else if (showed || initialTabWasEmpty) {
+          openLocation();
+        } else {
           gBrowser.selectedBrowser.focus();
         }
       });
