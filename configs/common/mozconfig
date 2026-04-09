@@ -48,6 +48,8 @@ if test "$ZEN_RELEASE"; then
 
   ac_add_options --enable-optimize
 
+  ac_add_options --enable-verify-mar
+
   ac_add_options --enable-release
   ac_add_options --disable-debug
   ac_add_options --disable-debug-symbols
@@ -88,8 +90,6 @@ if test "$ZEN_RELEASE"; then
   # but may cause stability issues.
   ac_add_options --enable-replace-malloc
 fi
-
-ac_add_options --enable-unverified-updates
 
 ac_add_options --enable-jxl
 
