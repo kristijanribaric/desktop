@@ -281,21 +281,11 @@ jobs:
           mv ./dist/output.mar windows${{ matrix.arch == 'aarch64' && '-arm64' || '' }}.mar
           mv ./dist/zen.installer.exe ./zen.installer${{ matrix.arch == 'aarch64' && '-arm64' || '' }}.exe
 
-      - name: Sign MAR
-        if: ${{ !inputs.generate-gpo }}
-        env:
-          SIGNMAR: engine/obj-${{ matrix.arch }}-pc-windows-msvc/dist/bin/signmar
-          ZEN_MAR_SIGNING_PASSWORD: ${{ secrets.ZEN_MAR_SIGNING_PASSWORD }}
-          ZEN_SIGNING_CERT_PEM_BASE64: ${{ secrets.ZEN_SIGNING_CERT_PEM_BASE64 }}
-          ZEN_SIGNING_PRIVATE_KEY_PEM_BASE64: ${{ secrets.ZEN_SIGNING_PRIVATE_KEY_PEM_BASE64 }}
-        run: |
-          bash scripts/mar_sign.sh -s ./windows${{ matrix.arch == 'aarch64' && '-arm64' || '' }}.mar
-
       - name: Upload artifact (PGO)
         uses: actions/upload-artifact@v4
         if: ${{ inputs.generate-gpo && matrix.arch == 'x86_64' }}
         with:
-          retention-days: 5
+          retention-days: 2
           name: ${{ matrix.arch == 'aarch64' && 'arm64' || matrix.arch }}-${{ inputs.profile-data-path-archive }}
           path: ./zen.win64-pgo-stage-1.zip
 
@@ -321,14 +311,6 @@ jobs:
           retention-days: 2
           name: windows-x64-obj-${{ matrix.arch == 'aarch64' && 'arm64' || matrix.arch }}
           path: obj-${{ matrix.arch }}-pc-windows-msvc
-
-      - name: Upload artifact (if Twilight branch, binary)
-        if: ${{ inputs.release-branch == 'twilight' && !inputs.generate-gpo }}
-        uses: actions/upload-artifact@v4
-        with:
-          retention-days: 5
-          name: zen.win-${{ matrix.arch == 'aarch64' && 'arm64' || matrix.arch }}.zip
-          path: ./zen.win-${{ matrix.arch == 'aarch64' && 'arm64' || matrix.arch }}.zip
 
       - name: Upload artifact (if Twilight branch, installer)
         if: ${{ inputs.release-branch == 'twilight' && !inputs.generate-gpo }}
