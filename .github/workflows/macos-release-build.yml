@@ -35,7 +35,6 @@ jobs:
     env:
       SCCACHE_GHA_ENABLED: ${{ inputs.use-sccache && 'true' || 'false' }}
       CARGO_TERM_COLOR: always
-      RUSTC_WRAPPER: ${{ inputs.use-sccache && 'sccache' || '' }}
       CARGO_INCREMENTAL: 0
     steps:
       - name: Checkout repository
@@ -133,6 +132,36 @@ jobs:
 
       - name: Build language packs
         run: sh scripts/download-language-packs.sh
+
+      - name: Build Zen (PGO stage 1 - generate)
+        env:
+          SURFER_COMPAT: ${{ matrix.arch }}
+          ZEN_RELEASE_BRANCH: ${{ inputs.release-branch }}
+          ZEN_GA_GENERATE_PROFILE: 1
+          ZEN_SAFEBROWSING_API_KEY: ${{ secrets.ZEN_SAFEBROWSING_API_KEY }}
+          ZEN_MOZILLA_API_KEY: ${{ secrets.ZEN_MOZILLA_API_KEY }}
+          ZEN_GOOGLE_LOCATION_SERVICE_API_KEY: ${{ secrets.ZEN_GOOGLE_LOCATION_SERVICE_API_KEY }}
+        run: |
+          export SURFER_PLATFORM="darwin"
+          if [[ -n ${{ inputs.MOZ_BUILD_DATE }} ]];then
+            export MOZ_BUILD_DATE=${{ inputs.MOZ_BUILD_DATE }}
+          fi
+          bash .github/workflows/src/release-build.sh
+
+      - name: Generate PGO profile data
+        env:
+          SURFER_COMPAT: ${{ matrix.arch }}
+        run: |
+          set -x
+          export LLVM_PROFDATA="$HOME/.mozbuild/clang/bin/llvm-profdata"
+          export JARLOG_FILE=en-US.log
+          mkdir -p "$HOME/artifact"
+          cd engine
+          ./mach python ../scripts/download_pgo_extended_corpus.py
+          ./mach package
+          ./mach python build/pgo/profileserver.py --extended-corpus ./pgo-extended-corpus
+          mv merged.profdata "$HOME/artifact/merged.profdata"
+          mv en-US.log "$HOME/artifact/en-US.log"
 
       - name: Build Zen
         env:

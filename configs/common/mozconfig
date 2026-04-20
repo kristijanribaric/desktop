@@ -26,13 +26,15 @@ export MOZ_INCLUDE_SOURCE_INFO=1
 
 ac_add_options --enable-application=browser
 
-# Anything except 'SCCACHE_GHA_ENABLED == false'
-if ! test "$SCCACHE_GHA_ENABLED" = "false"; then
+if test "$SCCACHE_GHA_ENABLED" = "true"; then
   if test -x "$(command -v sccache)"; then
     ac_add_options --with-ccache=sccache
   elif test -f "$HOME/.mozbuild/sccache/sccache"; then
     ac_add_options --with-ccache="$HOME"/.mozbuild/sccache/sccache
   fi
+
+  mk_add_options 'export RUSTC_WRAPPER=sccache'
+  mk_add_options 'export CCACHE_CPP2=yes'
 fi
 
 # add API keys if it exists on a file
@@ -50,8 +52,7 @@ fi
 
 if test "$ZEN_RELEASE"; then
 
-  # TODO: Make this successful in builds
-  # ac_add_options --enable-clang-plugin
+  ac_add_options --enable-clang-plugin
   ac_add_options --enable-bootstrap=-sccache
 
   ac_add_options --enable-optimize
