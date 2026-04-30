@@ -605,7 +605,7 @@ class nsZenWindowSync {
     if (isTab) {
       if (originalIsEssential !== targetIsEssential) {
         if (originalIsEssential) {
-          gZenPinnedTabManager.addToEssentials(aTargetItem);
+          gZenPinnedTabManager.addToEssentials(aTargetItem, { force: true });
         } else {
           gZenPinnedTabManager.removeEssentials(
             aTargetItem,

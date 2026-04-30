@@ -443,7 +443,7 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
     }
   }
 
-  addToEssentials(tab) {
+  addToEssentials(tab, { force = false } = {}) {
     // eslint-disable-next-line no-nested-ternary
     const tabs = tab
       ? // if it's already an array, dont make it [tab]
@@ -458,7 +458,7 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
       // eslint-disable-next-line no-shadow
       let tab = tabs[i];
       const section = gZenWorkspaces.getEssentialsSection(tab);
-      if (!this.canEssentialBeAdded(tab)) {
+      if (!force && !this.canEssentialBeAdded(tab)) {
         movedAll = false;
         continue;
       }
@@ -627,6 +627,7 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
       }
     });
     zenAddEssential.hidden = isEssential || !!contextTab.group;
+    const canAddEssential = this.canEssentialBeAdded(contextTab);
     document.l10n
       .formatValue("tab-context-zen-add-essential-badge", {
         num: gBrowser._numZenEssentials,
@@ -635,9 +636,10 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
       .then(badgeText => {
         zenAddEssential.setAttribute("badge", badgeText);
       });
+    zenAddEssential.toggleAttribute("disabled", !canAddEssential);
     document
       .getElementById("cmd_contextZenAddToEssentials")
-      .toggleAttribute("disabled", !this.canEssentialBeAdded(contextTab));
+      .toggleAttribute("disabled", !canAddEssential);
     document.getElementById("context_closeTab").hidden =
       contextTab.hasAttribute("zen-essential");
     document.getElementById("context_zen-remove-essential").hidden =

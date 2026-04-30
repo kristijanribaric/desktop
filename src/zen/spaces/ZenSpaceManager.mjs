@@ -491,7 +491,7 @@ class nsZenWorkspaces {
         const isCurrentlyEssential = existingTab.hasAttribute("zen-essential");
         const shouldBeEssential = !!tabData.zenEssential;
         if (shouldBeEssential && !isCurrentlyEssential) {
-          gZenPinnedTabManager.addToEssentials(existingTab);
+          gZenPinnedTabManager.addToEssentials(existingTab, { force: true });
         } else if (!shouldBeEssential && isCurrentlyEssential) {
           gZenPinnedTabManager.removeEssentials(existingTab, /* unpin */ false);
         }
@@ -610,7 +610,7 @@ class nsZenWorkspaces {
           }
           // addToEssentials pins the tab and moves it to the essentials section.
           // ZenWindowSync mirrors the pinned essential to other windows.
-          gZenPinnedTabManager.addToEssentials(newTab);
+          gZenPinnedTabManager.addToEssentials(newTab, { force: true });
           // Restore the tab's session state (URL / history) from pinnedInitialState.
           gZenPinnedTabManager.resetPinnedTab(newTab);
         } else {
