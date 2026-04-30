@@ -4,6 +4,11 @@
 
 import { nsZenDOMOperatedFeature } from "chrome://browser/content/zen-components/ZenCommonUtils.mjs";
 
+const lazy = {};
+ChromeUtils.defineESModuleGetters(lazy, {
+  SessionSaver: "resource:///modules/sessionstore/SessionSaver.sys.mjs",
+});
+
 function formatRelativeTime(timestamp) {
   const now = Date.now();
 
@@ -369,6 +374,15 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
       ].sort((a, b) => a._tPos > b._tPos);
     }
     parentFolder.collapsed = isActiveFolder;
+    if (folder?.id) {
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `f~${folder.id}`
+      );
+      folder.dispatchEvent(new CustomEvent("TabGroupMoved", { bubbles: true }));
+      void lazy.SessionSaver.run();
+    }
   }
 
   on_FolderUngrouped(event) {
@@ -379,6 +393,15 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     const folder = event.detail;
     for (const tab of folder.tabs) {
       this.animateUnload(parentFolder, tab, true);
+    }
+    if (folder?.id) {
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `f~${folder.id}`
+      );
+      folder.dispatchEvent(new CustomEvent("TabGroupMoved", { bubbles: true }));
+      void lazy.SessionSaver.run();
     }
   }
 

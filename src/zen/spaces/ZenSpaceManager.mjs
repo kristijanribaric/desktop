@@ -309,6 +309,136 @@ class nsZenWorkspaces {
     };
   }
 
+  #getSyncedFolderContainer(folderData) {
+    if (folderData.parentId) {
+      const parentFolder = document.getElementById(folderData.parentId);
+      if (!parentFolder?.isZenFolder) {
+        return null;
+      }
+      return {
+        container: parentFolder.groupContainer,
+        parentFolder,
+      };
+    }
+
+    const workspaceId = folderData.workspaceId || this.activeWorkspace;
+    const workspaceElement = this.workspaceElement(workspaceId);
+    return {
+      container: workspaceElement?.pinnedTabsContainer,
+      parentFolder: null,
+    };
+  }
+
+  #getOrderedIncomingFolders(folderDataList) {
+    const childrenByParent = new Map();
+    for (const folderData of folderDataList) {
+      const parentId = folderData.parentId || null;
+      if (!childrenByParent.has(parentId)) {
+        childrenByParent.set(parentId, []);
+      }
+      childrenByParent.get(parentId).push(folderData);
+    }
+
+    const result = [];
+    const seen = new Set();
+    const visiting = new Set();
+
+    const sortChildren = parentId => {
+      const children = childrenByParent.get(parentId) || [];
+      for (const folderData of children) {
+        visitChild(folderData, children);
+      }
+    };
+
+    const visitChild = (folderData, siblings) => {
+      if (seen.has(folderData.id) || visiting.has(folderData.id)) {
+        return;
+      }
+      visiting.add(folderData.id);
+      const siblingId =
+        folderData.prevSiblingInfo?.type === "group"
+          ? folderData.prevSiblingInfo.id
+          : null;
+      if (siblingId) {
+        const sibling = siblings.find(other => other.id === siblingId);
+        if (sibling) {
+          visitChild(sibling, siblings);
+        }
+      }
+      visiting.delete(folderData.id);
+      seen.add(folderData.id);
+      result.push(folderData);
+      sortChildren(folderData.id);
+    };
+
+    sortChildren(null);
+    for (const folderData of folderDataList) {
+      if (!seen.has(folderData.id)) {
+        result.push(folderData);
+      }
+    }
+    return result;
+  }
+
+  #applyIncomingFolderStructure(folderDataList) {
+    const orderedFolders = this.#getOrderedIncomingFolders(
+      folderDataList.filter(folderData => folderData?.id)
+    );
+
+    for (const folderData of orderedFolders) {
+      const folder = document.getElementById(folderData.id);
+      if (!folder?.isZenFolder) {
+        continue;
+      }
+
+      const placement = this.#getSyncedFolderContainer(folderData);
+      const container = placement?.container;
+      if (!container) {
+        continue;
+      }
+
+      const previousItem =
+        folderData.prevSiblingInfo?.type === "tab" ||
+        folderData.prevSiblingInfo?.type === "group"
+          ? document.getElementById(folderData.prevSiblingInfo.id)
+          : null;
+
+      gBrowser.zenHandleTabMove(folder, () => {
+        if (previousItem?.parentNode === container && previousItem !== folder) {
+          previousItem.after(folder);
+          return;
+        }
+
+        if (placement.parentFolder) {
+          const initialSibling =
+            placement.parentFolder.tabs.find(tab =>
+              tab.hasAttribute("zen-empty-tab")
+            ) || null;
+          if (
+            initialSibling?.parentNode === container &&
+            initialSibling !== folder
+          ) {
+            initialSibling.after(folder);
+            return;
+          }
+          container.insertBefore(folder, container.firstChild);
+          return;
+        }
+
+        const separator =
+          container.querySelector(".pinned-tabs-container-separator");
+        if (separator?.parentNode === container && separator !== folder) {
+          container.insertBefore(folder, separator);
+          return;
+        }
+        container.insertBefore(folder, container.firstChild);
+      });
+    }
+
+    this.makeSureEmptyTabIsFirst();
+    this.updateTabsContainers();
+  }
+
   #applyIncomingTabPositions(tabDataList) {
     const orderedTabs = [...tabDataList]
       .filter(tabData => typeof tabData.position === "number")
@@ -454,6 +584,12 @@ class nsZenWorkspaces {
         if (folderData.workspaceId) {
           existing.setAttribute("zen-workspace-id", folderData.workspaceId);
         }
+        if (folderData.saveOnWindowClose !== undefined) {
+          existing.saveOnWindowClose = folderData.saveOnWindowClose;
+        }
+        if (folderData.isLiveFolder !== undefined) {
+          existing.isLiveFolder = folderData.isLiveFolder;
+        }
         if (folderData.userIcon !== undefined) {
           gZenFolders.setFolderUserIcon(existing, folderData.userIcon);
         }
@@ -468,8 +604,16 @@ class nsZenWorkspaces {
           label: folderData.name || "Folder",
           workspaceId: folderData.workspaceId,
           collapsed: folderData.collapsed,
+          saveOnWindowClose: folderData.saveOnWindowClose,
+          isLiveFolder: folderData.isLiveFolder,
           skipEmptyTab: true,
         });
+        if (folderData.userIcon !== undefined) {
+          const createdFolder = document.getElementById(folderData.id);
+          if (createdFolder?.isZenFolder) {
+            gZenFolders.setFolderUserIcon(createdFolder, folderData.userIcon);
+          }
+        }
       }
     }
 
@@ -676,6 +820,9 @@ class nsZenWorkspaces {
     }
 
     this.#applyIncomingTabPositions(incomingTabs);
+    this.#applyIncomingFolderStructure(
+      lazy.ZenSessionStore.getSidebarData()?.folders || incomingFolders
+    );
   }
 
   log(...args) {

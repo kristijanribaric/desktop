@@ -80,7 +80,7 @@ export class nsZenFolder extends MozTabbrowserTabGroup {
 
     this.labelElement.onRenameFinished = newLabel => {
       this.name = newLabel.trim() || "Folder";
-      const event = new CustomEvent("ZenFolderRenamed", {
+      const event = new CustomEvent("TabGroupUpdate", {
         bubbles: true,
       });
       this.dispatchEvent(event);
