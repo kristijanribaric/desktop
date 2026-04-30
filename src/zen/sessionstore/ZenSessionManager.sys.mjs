@@ -320,6 +320,7 @@ export class nsZenSessionManager {
       }
     }
     delete this._dataFromFile;
+    this._lastSnapshot = this.#buildSnapshot(this.#sidebar);
   }
 
   get #shouldRestoreOnlyPinned() {
@@ -987,12 +988,23 @@ export class nsZenSessionManager {
             container.color
           );
         } else {
-          lazy.ContextualIdentityService.create(
+          const createdIdentity = lazy.ContextualIdentityService.create(
             container.name,
             container.icon,
             container.color,
             container.userContextId
           );
+          if (
+            createdIdentity &&
+            String(createdIdentity.userContextId) !==
+              String(container.userContextId)
+          ) {
+            this.log("Container sync created with unexpected identity ID", {
+              requestedId: container.userContextId,
+              createdId: createdIdentity.userContextId,
+              name: container.name,
+            });
+          }
         }
       }
       for (const container of removals.containers || []) {
@@ -1064,7 +1076,15 @@ export class nsZenSessionManager {
           const existing = tabMap.get(tab.zenSyncId);
           tabMap.set(tab.zenSyncId, existing ? { ...existing, ...tab } : tab);
         }
-        sidebar.tabs = [...noIdTabs, ...tabMap.values()];
+        const syncedTabs = Array.from(tabMap.values());
+        syncedTabs.sort((a, b) => {
+          const aPosition =
+            typeof a.position === "number" ? a.position : Number.POSITIVE_INFINITY;
+          const bPosition =
+            typeof b.position === "number" ? b.position : Number.POSITIVE_INFINITY;
+          return aPosition - bPosition;
+        });
+        sidebar.tabs = [...noIdTabs, ...syncedTabs];
       }
 
       if (pulled.folders?.length) {

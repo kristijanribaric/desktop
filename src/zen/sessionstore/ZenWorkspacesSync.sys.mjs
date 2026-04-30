@@ -164,7 +164,9 @@ class ZenWorkspacesStore extends Store {
       }
 
       case "tab": {
-        const tab = (sidebar.tabs || []).find(t => t.zenSyncId === parsed.key);
+        const tabs = sidebar.tabs || [];
+        const idx = tabs.findIndex(t => t.zenSyncId === parsed.key);
+        const tab = idx === -1 ? null : tabs[idx];
         if (!tab) {
           record.deleted = true;
           return record;
@@ -175,15 +177,15 @@ class ZenWorkspacesStore extends Store {
         }
         // Trim unpinned tab entries to just the active entry
         if (!tab.pinned && cleaned.entries?.length) {
-          const idx =
+          const entryIndex =
             typeof cleaned.index === "number"
               ? Math.max(0, cleaned.index - 1)
               : 0;
-          const entry = cleaned.entries[idx] || cleaned.entries[0];
+          const entry = cleaned.entries[entryIndex] || cleaned.entries[0];
           cleaned.entries = entry ? [entry] : [];
           cleaned.index = 1;
         }
-        record.cleartext = { id, type: "tab", ...cleaned };
+        record.cleartext = { id, type: "tab", ...cleaned, position: idx };
         break;
       }
 
@@ -473,7 +475,7 @@ export class ZenWorkspacesEngine extends SyncEngine {
   }
 
   get version() {
-    return 1;
+    return 2;
   }
 
   get syncPriority() {

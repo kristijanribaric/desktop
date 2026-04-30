@@ -201,6 +201,162 @@ class nsZenWorkspaces {
     await this._applyPulledItems(pulled);
   }
 
+  #getSyncedTabActiveEntry(tabData) {
+    const entries = tabData.entries || [];
+    if (entries.length) {
+      const entryIndex =
+        typeof tabData.index === "number" ? Math.max(0, tabData.index - 1) : 0;
+      return entries[entryIndex] ?? entries[0] ?? null;
+    }
+    return tabData._zenPinnedInitialState?.entry || null;
+  }
+
+  #getSyncedTabState(tab) {
+    try {
+      return JSON.parse(SessionStore.getTabState(tab));
+    } catch (error) {
+      console.error("gZenWorkspaces: Failed to read current tab state", error);
+      return null;
+    }
+  }
+
+  #applyIncomingTabNavigation(tab, tabData) {
+    const incomingEntry = this.#getSyncedTabActiveEntry(tabData);
+    if (!incomingEntry?.url || tab.hasAttribute("zen-empty-tab")) {
+      return;
+    }
+
+    const currentState = this.#getSyncedTabState(tab);
+    if (!currentState) {
+      return;
+    }
+
+    const entryIndex =
+      typeof currentState.index === "number"
+        ? Math.max(0, currentState.index - 1)
+        : 0;
+    const currentEntry =
+      currentState.entries?.[entryIndex] ?? currentState.entries?.[0] ?? null;
+
+    if (currentEntry?.url === incomingEntry.url) {
+      if (tab.pinned) {
+        tab._zenPinnedInitialState = {
+          entry: incomingEntry,
+          image: tabData.image || tab._zenPinnedInitialState?.image || "",
+        };
+      }
+      return;
+    }
+
+    if (tab.pinned) {
+      tab._zenPinnedInitialState = {
+        entry: incomingEntry,
+        image: tabData.image || tab._zenPinnedInitialState?.image || "",
+      };
+      gZenPinnedTabManager.resetPinnedTab(tab);
+      return;
+    }
+
+    const newState = {
+      ...currentState,
+      entries: [incomingEntry],
+      index: 1,
+    };
+    if (tabData.image) {
+      newState.image = tabData.image;
+    }
+    delete newState.scroll;
+    SessionStore.setTabState(tab, newState);
+  }
+
+  #getSyncedTabContainer(tab) {
+    if (
+      !tab ||
+      !gBrowser.isTab(tab) ||
+      tab.group?.hasAttribute("split-view-group")
+    ) {
+      return null;
+    }
+
+    if (tab.group?.isZenFolder) {
+      return {
+        container: tab.group.groupContainer,
+        initialSibling:
+          tab.group.tabs.find(groupTab => groupTab.hasAttribute("zen-empty-tab")) ||
+          null,
+      };
+    }
+
+    if (tab.hasAttribute("zen-essential")) {
+      return {
+        container: this.getEssentialsSection(tab),
+        initialSibling: null,
+      };
+    }
+
+    const workspaceId =
+      tab.getAttribute("zen-workspace-id") || this.activeWorkspace;
+    const workspaceElement = this.workspaceElement(workspaceId);
+    return {
+      container: tab.pinned
+        ? workspaceElement?.pinnedTabsContainer
+        : workspaceElement?.tabsContainer,
+      initialSibling: null,
+    };
+  }
+
+  #applyIncomingTabPositions(tabDataList) {
+    const orderedTabs = [...tabDataList]
+      .filter(tabData => typeof tabData.position === "number")
+      .sort((a, b) => a.position - b.position);
+
+    if (!orderedTabs.length) {
+      return;
+    }
+
+    const lastItemByContainer = new Map();
+    const movedItems = new Set();
+
+    for (const tabData of orderedTabs) {
+      const tab = document.getElementById(tabData.zenSyncId);
+      if (!tab || !gBrowser.isTab(tab) || tab.hasAttribute("zen-empty-tab")) {
+        continue;
+      }
+
+      const moveItem = tab.group?.hasAttribute("split-view-group") ? tab.group : tab;
+      if (!moveItem || movedItems.has(moveItem)) {
+        continue;
+      }
+
+      const placement = this.#getSyncedTabContainer(tab);
+      if (!placement?.container) {
+        continue;
+      }
+
+      const { container, initialSibling } = placement;
+      const previousItem = lastItemByContainer.get(container);
+
+      gBrowser.zenHandleTabMove(moveItem, () => {
+        if (previousItem?.parentNode === container && previousItem !== moveItem) {
+          previousItem.after(moveItem);
+        } else if (
+          initialSibling?.parentNode === container &&
+          initialSibling !== moveItem
+        ) {
+          initialSibling.after(moveItem);
+        } else {
+          container.insertBefore(moveItem, container.firstChild);
+        }
+      });
+
+      lastItemByContainer.set(container, moveItem);
+      movedItems.add(moveItem);
+    }
+
+    this.makeSureEmptyTabIsFirst();
+    this.updateTabsContainers();
+  }
+
   /**
    * Removes folders and tabs that were previously synced but are absent
    * from the latest incoming sync payload.
@@ -366,7 +522,20 @@ class nsZenWorkspaces {
         }
         if (typeof tabData.zenStaticLabel === "string") {
           existingTab.zenStaticLabel = tabData.zenStaticLabel;
+          gBrowser._setTabLabel(existingTab, tabData.zenStaticLabel);
+        } else {
+          delete existingTab.zenStaticLabel;
+          const activeEntry = this.#getSyncedTabActiveEntry(tabData);
+          if (activeEntry?.title) {
+            gBrowser._setTabLabel(existingTab, activeEntry.title);
+          }
         }
+        if (tabData.zenHasStaticIcon && tabData.image) {
+          existingTab.zenStaticIcon = tabData.image;
+        } else {
+          delete existingTab.zenStaticIcon;
+        }
+        this.#applyIncomingTabNavigation(existingTab, tabData);
 
         continue;
       }
@@ -473,7 +642,7 @@ class nsZenWorkspaces {
         }
       } else {
         // --- UNPINNED TAB CREATION ---
-        const activeEntry = tabData.entries?.[0] || {};
+        const activeEntry = this.#getSyncedTabActiveEntry(tabData) || {};
         const url = activeEntry.url || "about:blank";
         const newTab = gBrowser.addTrustedTab(url, { createLazyBrowser: true });
         newTab.id = tabData.zenSyncId;
@@ -496,6 +665,8 @@ class nsZenWorkspaces {
         }
       }
     }
+
+    this.#applyIncomingTabPositions(incomingTabs);
   }
 
   log(...args) {
@@ -1058,7 +1229,7 @@ class nsZenWorkspaces {
 
     this._workspaceBookmarksCache = { bookmarks, lastChangeTimestamp };
 
-    return this._workspaceCache;
+    return this._workspaceBookmarksCache;
   }
 
   restoreWorkspacesFromSessionStore(aWinData = {}) {

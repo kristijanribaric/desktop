@@ -10,11 +10,14 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+  BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
+  SessionSaver: "resource:///modules/sessionstore/SessionSaver.sys.mjs",
   TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
   TabStateCache: "resource:///modules/sessionstore/TabStateCache.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   RunState: "resource:///modules/sessionstore/RunState.sys.mjs",
+  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -254,6 +257,7 @@ class nsZenWindowSync {
     for (let eventName of EVENTS) {
       aWindow.addEventListener(eventName, this, true);
     }
+    aWindow.gBrowser.addTabsProgressListener(this);
     this.#maybeTriggerInitialTabSync(aWindow);
   }
 
@@ -1193,6 +1197,67 @@ class nsZenWindowSync {
       : { entries: [] };
   }
 
+  #getActiveEntryUrl(tabData) {
+    const entries = tabData?.entries || [];
+    if (entries.length) {
+      const entryIndex =
+        typeof tabData.index === "number" ? Math.max(0, tabData.index - 1) : 0;
+      return entries[entryIndex]?.url || entries[0]?.url || "";
+    }
+    return tabData?._zenPinnedInitialState?.entry?.url || "";
+  }
+
+  async onLocationChange(
+    aBrowser,
+    aWebProgress,
+    aRequest,
+    aLocationURI,
+    aFlags,
+    aIsSimulated = false
+  ) {
+    if (
+      aIsSimulated ||
+      !aBrowser ||
+      !aLocationURI ||
+      (aLocationURI.spec === "about:blank" &&
+        lazy.BrowserUIUtils.checkEmptyPageOrigin(aBrowser)) ||
+      aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SESSION_STORE
+    ) {
+      return;
+    }
+
+    const window = aBrowser.ownerGlobal;
+    const tab = window?.gBrowser?.getTabForBrowser(aBrowser);
+    if (
+      !tab ||
+      !tab.id ||
+      tab.closing ||
+      tab.hasAttribute("zen-empty-tab") ||
+      window.gZenWorkspaces?.privateWindowOrDisabled
+    ) {
+      return;
+    }
+
+    await lazy.TabStateFlusher.flush(aBrowser);
+
+    const { entries, index } = this.#getTabEntriesFromCache(tab);
+    const currentURL = this.#getActiveEntryUrl({ entries, index });
+    if (!currentURL) {
+      return;
+    }
+
+    const sidebarTab = lazy.ZenSessionStore
+      .getSidebarData()
+      .tabs?.find(savedTab => savedTab.zenSyncId === tab.id);
+    const savedURL = this.#getActiveEntryUrl(sidebarTab);
+
+    if (currentURL === savedURL) {
+      return;
+    }
+
+    await lazy.SessionSaver.run();
+  }
+
   /**
    * Flushes the tab state for a given tab if it has a linked browser.
    *
@@ -1328,7 +1393,10 @@ class nsZenWindowSync {
 
   /* Mark: Event Handlers */
 
-  on_TabOpen(aEvent, { ignoreExistingId = false } = {}) {
+  on_TabOpen(
+    aEvent,
+    { ignoreExistingId = false, duringPinning = false } = {}
+  ) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
     const isUnsyncedWindow = window.gZenWorkspaces.privateWindowOrDisabled;
@@ -1506,7 +1574,10 @@ class nsZenWindowSync {
       tabStatePromise,
       this.on_TabMove(aEvent).then(() => {
         if (lazy.gSyncOnlyPinnedTabs) {
-          this.on_TabOpen({ target: tab }, { ignoreExistingId: true });
+          this.on_TabOpen(
+            { target: tab },
+            { ignoreExistingId: true, duringPinning: true }
+          );
         }
       }),
     ]);
@@ -1623,6 +1694,7 @@ class nsZenWindowSync {
     for (let eventName of EVENTS) {
       window.removeEventListener(eventName, this);
     }
+    window.gBrowser?.removeTabsProgressListener(this);
     delete window.gZenWindowSync;
     this.#moveAllActiveTabsToOtherWindowsForClose(window);
   }
