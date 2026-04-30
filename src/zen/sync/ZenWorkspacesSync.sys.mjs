@@ -158,7 +158,7 @@ class ZenWorkspacesStore extends Store {
           record.deleted = true;
           return record;
         }
-        const { syncStatus: _s, ...rest } = spaces[idx];
+        const { syncStatus: _sx, ...rest } = spaces[idx];
         record.cleartext = { id, type: "space", ...rest, position: idx };
         break;
       }

@@ -10,6 +10,7 @@ import { ZenSpacesSwipe } from "resource:///modules/zen/ZenSpacesSwipe.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  SessionSaver: "resource:///modules/sessionstore/SessionSaver.sys.mjs",
   ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
 });
 
@@ -190,7 +191,9 @@ class nsZenWorkspaces {
         const existing = localMap.get(space.uuid);
         localMap.set(space.uuid, existing ? { ...existing, ...space } : space);
       }
-      await this.propagateWorkspaces(Array.from(localMap.values()));
+      await this.propagateWorkspaces(
+        this.#getOrderedWorkspacesByPosition(Array.from(localMap.values()))
+      );
       this.#propagateWorkspaceData();
     }
 
@@ -1201,8 +1204,29 @@ class nsZenWorkspaces {
     return [...this._workspaceCache];
   }
 
+  #normalizeWorkspacePositions(workspaces = []) {
+    return workspaces.map((workspace, index) => {
+      workspace.position = index;
+      return workspace;
+    });
+  }
+
+  #getOrderedWorkspacesByPosition(workspaces = []) {
+    const orderedWorkspaces = [...workspaces]
+      .map((workspace, index) => ({ workspace, index }))
+      .sort((a, b) => {
+        const aPosition =
+          typeof a.workspace.position === "number" ? a.workspace.position : a.index;
+        const bPosition =
+          typeof b.workspace.position === "number" ? b.workspace.position : b.index;
+        return aPosition - bPosition || a.index - b.index;
+      })
+      .map(({ workspace }) => workspace);
+    return this.#normalizeWorkspacePositions(orderedWorkspaces);
+  }
+
   getWorkspacesForSessionStore() {
-    const spaces = this.getWorkspaces();
+    const spaces = this.#normalizeWorkspacePositions(this.getWorkspaces());
     let spacesForSS = [];
     for (const space of spaces) {
       let newSpace = { ...space };
@@ -1826,6 +1850,7 @@ class nsZenWorkspaces {
   }
 
   propagateWorkspaces(aWorkspaces) {
+    aWorkspaces = this.#normalizeWorkspacePositions(aWorkspaces);
     const previousWorkspaces = this._workspaceCache || [];
     let promises = [];
     let hasChanged = false;
@@ -1917,15 +1942,17 @@ class nsZenWorkspaces {
     workspaces.splice(newPosition, 0, workspace);
     // Propagate the changes if the order has changed
     if (currentIndex !== newPosition) {
-      // Mark all workspaces as modified so the new order is pushed to sync.
-      for (const ws of workspaces) {
+      const orderedWorkspaces = this.#normalizeWorkspacePositions(workspaces);
+      this._workspaceCache = orderedWorkspaces;
+      for (const ws of orderedWorkspaces) {
         Services.obs.notifyObservers(
           null,
           "zen-workspace-item-changed",
           `s~${ws.uuid}`
         );
       }
-      this.#propagateWorkspaceData();
+      this.#propagateWorkspaceData(orderedWorkspaces);
+      await lazy.SessionSaver.run();
     }
   }
 
