@@ -425,8 +425,9 @@ class nsZenWorkspaces {
           return;
         }
 
-        const separator =
-          container.querySelector(".pinned-tabs-container-separator");
+        const separator = container.querySelector(
+          ".pinned-tabs-container-separator"
+        );
         if (separator?.parentNode === container && separator !== folder) {
           container.insertBefore(folder, separator);
           return;
@@ -1363,9 +1364,13 @@ class nsZenWorkspaces {
       .map((workspace, index) => ({ workspace, index }))
       .sort((a, b) => {
         const aPosition =
-          typeof a.workspace.position === "number" ? a.workspace.position : a.index;
+          typeof a.workspace.position === "number"
+            ? a.workspace.position
+            : a.index;
         const bPosition =
-          typeof b.workspace.position === "number" ? b.workspace.position : b.index;
+          typeof b.workspace.position === "number"
+            ? b.workspace.position
+            : b.index;
         return aPosition - bPosition || a.index - b.index;
       })
       .map(({ workspace }) => workspace);
