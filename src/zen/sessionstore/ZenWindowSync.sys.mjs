@@ -594,6 +594,10 @@ class nsZenWindowSync {
     const targetIsEssential = aTargetItem.hasAttribute("zen-essential");
     const originalIsPinned = aOriginalItem.pinned;
     const targetIsPinned = aTargetItem.pinned;
+    const originalUserContextId =
+      parseInt(aOriginalItem.getAttribute("usercontextid"), 10) || 0;
+    const targetUserContextId =
+      parseInt(aTargetItem.getAttribute("usercontextid"), 10) || 0;
 
     const isGroup = gBrowser.isTabGroup(aOriginalItem);
     const isTab = !isGroup;
@@ -603,6 +607,14 @@ class nsZenWindowSync {
     }
 
     if (isTab) {
+      if (
+        originalUserContextId !== targetUserContextId &&
+        typeof aTargetItem.setUserContextId === "function"
+      ) {
+        aTargetItem.setUserContextId(originalUserContextId);
+      }
+      gZenPinnedTabManager.syncDefaultUserContextId(aTargetItem);
+
       if (originalIsEssential !== targetIsEssential) {
         if (originalIsEssential) {
           gZenPinnedTabManager.addToEssentials(aTargetItem, { force: true });

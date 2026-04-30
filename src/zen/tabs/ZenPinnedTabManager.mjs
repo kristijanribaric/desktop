@@ -114,6 +114,11 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
     tab.style.setProperty("--zen-essential-tab-icon", `url(${iconUrl})`);
   }
 
+  syncDefaultUserContextId(tab) {
+    const userContextId = parseInt(tab?.getAttribute("usercontextid"), 10) || 0;
+    tab?.toggleAttribute("zenDefaultUserContextId", userContextId === 0);
+  }
+
   _onTabResetPinButton(event, tab) {
     event.stopPropagation();
     if (event.getModifierState("Accel")) {
@@ -483,7 +488,7 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
         gBrowser.pinTab(tab);
         this._ignoreNextTabPinnedEvent = true;
       }
-      tab.setAttribute("zenDefaultUserContextId", true);
+      this.syncDefaultUserContextId(tab);
       if (tab.selected) {
         gZenWorkspaces.switchTabIfNeeded(tab);
       }
@@ -528,6 +533,7 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
           pinContainer.prepend(tab);
         });
       }
+      this.syncDefaultUserContextId(tab);
       // Dispatch the event to update the UI
       const event = new CustomEvent("TabRemovedFromEssentials", {
         detail: { tab },

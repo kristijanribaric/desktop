@@ -14,6 +14,9 @@ class ZenSessionStore extends nsZenPreloadedFeature {
   });
 
   restoreInitialTabData(tab, tabData) {
+    if (typeof tab.setUserContextId === "function") {
+      tab.setUserContextId(tabData.userContextId || 0);
+    }
     if (tabData.zenWorkspace) {
       tab.setAttribute("zen-workspace-id", tabData.zenWorkspace);
     }
@@ -33,8 +36,10 @@ class ZenSessionStore extends nsZenPreloadedFeature {
     if (tabData.zenEssential) {
       tab.setAttribute("zen-essential", "true");
     }
-    if (tabData.zenDefaultUserContextId) {
+    if (tabData.zenDefaultUserContextId && !(tabData.userContextId || 0)) {
       tab.setAttribute("zenDefaultUserContextId", "true");
+    } else {
+      tab.removeAttribute("zenDefaultUserContextId");
     }
     if (tabData._zenPinnedInitialState) {
       tab._zenPinnedInitialState = tabData._zenPinnedInitialState;

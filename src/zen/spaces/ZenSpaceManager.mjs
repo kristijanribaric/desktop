@@ -223,6 +223,36 @@ class nsZenWorkspaces {
     }
   }
 
+  #getSyncedTabUserContextId(tabData) {
+    return parseInt(tabData?.userContextId, 10) || 0;
+  }
+
+  #applyIncomingTabContainer(tab, tabData) {
+    if (!tab || !gBrowser.isTab(tab)) {
+      return;
+    }
+
+    const targetUserContextId = this.#getSyncedTabUserContextId(tabData);
+    const currentUserContextId =
+      parseInt(tab.getAttribute("usercontextid"), 10) || 0;
+
+    if (
+      currentUserContextId !== targetUserContextId &&
+      typeof tab.setUserContextId === "function"
+    ) {
+      tab.setUserContextId(targetUserContextId);
+    }
+
+    gZenPinnedTabManager.syncDefaultUserContextId(tab);
+
+    if (tab.hasAttribute("zen-essential")) {
+      const essentialsSection = this.getEssentialsSection(tab);
+      if (essentialsSection && tab.parentNode !== essentialsSection) {
+        essentialsSection.appendChild(tab);
+      }
+    }
+  }
+
   #applyIncomingTabNavigation(tab, tabData) {
     const incomingEntry = this.#getSyncedTabActiveEntry(tabData);
     if (!incomingEntry?.url || tab.hasAttribute("zen-empty-tab")) {
@@ -625,6 +655,8 @@ class nsZenWorkspaces {
       }
       const existingTab = document.getElementById(tabData.zenSyncId);
       if (existingTab && gBrowser.isTab(existingTab)) {
+        this.#applyIncomingTabContainer(existingTab, tabData);
+
         if (
           tabData.zenWorkspace &&
           existingTab.getAttribute("zen-workspace-id") !== tabData.zenWorkspace
@@ -716,9 +748,12 @@ class nsZenWorkspaces {
 
         // Create the tab unpinned so ZenWindowSync does NOT mirror it yet
         // (with gSyncOnlyPinnedTabs=true it skips unpinned tabs in on_TabOpen).
-        const newTab = gBrowser.addTrustedTab("about:blank", {
-          createLazyBrowser: true,
-        });
+        const pinnedOptions = { createLazyBrowser: true };
+        const pinnedUserContextId = this.#getSyncedTabUserContextId(tabData);
+        if (pinnedUserContextId) {
+          pinnedOptions.userContextId = pinnedUserContextId;
+        }
+        const newTab = gBrowser.addTrustedTab("about:blank", pinnedOptions);
 
         // Set the zenSyncId as the DOM id BEFORE pinning.  The guard we added
         // to ZenWindowSync.on_TabOpen (!tab.id) will preserve this id through
@@ -798,7 +833,12 @@ class nsZenWorkspaces {
         // --- UNPINNED TAB CREATION ---
         const activeEntry = this.#getSyncedTabActiveEntry(tabData) || {};
         const url = activeEntry.url || "about:blank";
-        const newTab = gBrowser.addTrustedTab(url, { createLazyBrowser: true });
+        const unpinnedOptions = { createLazyBrowser: true };
+        const unpinnedUserContextId = this.#getSyncedTabUserContextId(tabData);
+        if (unpinnedUserContextId) {
+          unpinnedOptions.userContextId = unpinnedUserContextId;
+        }
+        const newTab = gBrowser.addTrustedTab(url, unpinnedOptions);
         newTab.id = tabData.zenSyncId;
         if (tabData.zenWorkspace) {
           newTab.setAttribute("zen-workspace-id", tabData.zenWorkspace);
