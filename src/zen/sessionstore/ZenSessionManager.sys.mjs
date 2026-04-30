@@ -301,7 +301,10 @@ export class nsZenSessionManager {
     const rawData = this._dataFromFile || {};
     const { _syncMeta: _ignored, ...sidebarData } = rawData;
     this.#sidebar = sidebarData;
-    if (!this.#sidebarWithoutCloning.spaces?.length && !this._shouldRunMigration) {
+    if (
+      !this.#sidebarWithoutCloning.spaces?.length &&
+      !this._shouldRunMigration
+    ) {
       this.log(
         "No spaces data found in session file, running migration",
         this.#sidebarWithoutCloning
@@ -1079,9 +1082,13 @@ export class nsZenSessionManager {
         const syncedTabs = Array.from(tabMap.values());
         syncedTabs.sort((a, b) => {
           const aPosition =
-            typeof a.position === "number" ? a.position : Number.POSITIVE_INFINITY;
+            typeof a.position === "number"
+              ? a.position
+              : Number.POSITIVE_INFINITY;
           const bPosition =
-            typeof b.position === "number" ? b.position : Number.POSITIVE_INFINITY;
+            typeof b.position === "number"
+              ? b.position
+              : Number.POSITIVE_INFINITY;
           return aPosition - bPosition;
         });
         sidebar.tabs = [...noIdTabs, ...syncedTabs];

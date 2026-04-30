@@ -282,8 +282,9 @@ class nsZenWorkspaces {
       return {
         container: tab.group.groupContainer,
         initialSibling:
-          tab.group.tabs.find(groupTab => groupTab.hasAttribute("zen-empty-tab")) ||
-          null,
+          tab.group.tabs.find(groupTab =>
+            groupTab.hasAttribute("zen-empty-tab")
+          ) || null,
       };
     }
 
@@ -323,7 +324,9 @@ class nsZenWorkspaces {
         continue;
       }
 
-      const moveItem = tab.group?.hasAttribute("split-view-group") ? tab.group : tab;
+      const moveItem = tab.group?.hasAttribute("split-view-group")
+        ? tab.group
+        : tab;
       if (!moveItem || movedItems.has(moveItem)) {
         continue;
       }
@@ -337,7 +340,10 @@ class nsZenWorkspaces {
       const previousItem = lastItemByContainer.get(container);
 
       gBrowser.zenHandleTabMove(moveItem, () => {
-        if (previousItem?.parentNode === container && previousItem !== moveItem) {
+        if (
+          previousItem?.parentNode === container &&
+          previousItem !== moveItem
+        ) {
           previousItem.after(moveItem);
         } else if (
           initialSibling?.parentNode === container &&

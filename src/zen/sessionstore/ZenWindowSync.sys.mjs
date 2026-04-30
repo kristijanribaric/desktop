@@ -1246,9 +1246,9 @@ class nsZenWindowSync {
       return;
     }
 
-    const sidebarTab = lazy.ZenSessionStore
-      .getSidebarData()
-      .tabs?.find(savedTab => savedTab.zenSyncId === tab.id);
+    const sidebarTab = lazy.ZenSessionStore.getSidebarData().tabs?.find(
+      savedTab => savedTab.zenSyncId === tab.id
+    );
     const savedURL = this.#getActiveEntryUrl(sidebarTab);
 
     if (currentURL === savedURL) {
@@ -1393,10 +1393,7 @@ class nsZenWindowSync {
 
   /* Mark: Event Handlers */
 
-  on_TabOpen(
-    aEvent,
-    { ignoreExistingId = false, duringPinning = false } = {}
-  ) {
+  on_TabOpen(aEvent, { ignoreExistingId = false, duringPinning = false } = {}) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
     const isUnsyncedWindow = window.gZenWorkspaces.privateWindowOrDisabled;
