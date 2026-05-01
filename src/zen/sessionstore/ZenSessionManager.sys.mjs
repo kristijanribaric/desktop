@@ -10,14 +10,13 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   ZenLiveFoldersManager:
     "resource:///modules/zen/ZenLiveFoldersManager.sys.mjs",
+  ZenSyncStore: "resource:///modules/zen/ZenSyncManager.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
   gWindowSyncEnabled: "resource:///modules/zen/ZenWindowSync.sys.mjs",
   gSyncOnlyPinnedTabs: "resource:///modules/zen/ZenWindowSync.sys.mjs",
   DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
-  ContextualIdentityService:
-    "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -95,13 +94,6 @@ export class nsZenSessionManager {
    * A deferred task to create backups of the session file.
    */
   #deferredBackupTask = null;
-  /**
-   * Snapshot of item hashes from the last saveState() cycle, used
-   * to detect per-item changes for the multi-record sync engine.
-   * Shape: { spaces: Map<uuid,hash>, tabs: Map<zenSyncId,hash>,
-   *          folders: Map<id,hash>, metaHash: string }
-   */
-  _lastSnapshot = null;
 
   init() {
     this.log("Initializing session manager");
@@ -298,9 +290,7 @@ export class nsZenSessionManager {
     } catch (e) {
       console.error("ZenSessionManager: Failed to read session file", e);
     }
-    const rawData = this._dataFromFile || {};
-    const { _syncMeta: _ignored, ...sidebarData } = rawData;
-    this.#sidebar = sidebarData;
+    this.#sidebar = this._dataFromFile || {};
     if (
       !this.#sidebarWithoutCloning.spaces?.length &&
       !this._shouldRunMigration
@@ -323,7 +313,7 @@ export class nsZenSessionManager {
       }
     }
     delete this._dataFromFile;
-    this._lastSnapshot = this.#buildSnapshot(this.#sidebar);
+    lazy.ZenSyncStore.seedSnapshot(this.#sidebar);
   }
 
   get #shouldRestoreOnlyPinned() {
@@ -621,7 +611,7 @@ export class nsZenSessionManager {
       }
     );
     this.#collectWindowData(windows);
-    this.#notifyChangedItems(this.#sidebar);
+    lazy.ZenSyncStore.noteSidebarDataChanged(this.#sidebar);
     let sidebar = this.#sidebarWithoutCloning;
     this.#file.data = sidebar;
     if (soon) {
@@ -961,6 +951,16 @@ export class nsZenSessionManager {
     return JSON.parse(JSON.stringify(sidebar));
   }
 
+  replaceSidebarData(sidebar, soon = true) {
+    this.#sidebar = sidebar || {};
+    this.#file.data = this.#sidebarWithoutCloning;
+    if (soon) {
+      this.#file.saveSoon();
+    } else {
+      this.#file._save();
+    }
+  }
+
   getCurrentSidebarData() {
     const state = lazy.SessionStore.getCurrentState(true);
     let windows = state?.windows || [];
@@ -972,336 +972,6 @@ export class nsZenSessionManager {
     const sidebarData = { lastCollected: Date.now() };
     this.#collectTabsData(sidebarData, windows);
     return JSON.parse(JSON.stringify(sidebarData));
-  }
-
-  /**
-   * Applies incoming sync data. Called by the ZenWorkspacesStore
-   * after classifying all incoming records by type.
-   *
-   * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} pulled
-   * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} removals
-   * @param {{ groups: Array, splitViewData: Array }|null} meta
-   */
-  async applyMultiRecordSync(pulled, removals, meta) {
-    try {
-      let sidebar = { ...this.#sidebar };
-
-      // 1. Apply container changes via ContextualIdentityService
-      const localContainers =
-        lazy.ContextualIdentityService.getPublicIdentities();
-      for (const container of pulled.containers || []) {
-        if (!container.name) {
-          continue;
-        }
-        const existsLocally = localContainers.some(
-          c => String(c.userContextId) === String(container.userContextId)
-        );
-        if (existsLocally) {
-          lazy.ContextualIdentityService.update(
-            container.userContextId,
-            container.name,
-            container.icon,
-            container.color
-          );
-        } else {
-          const createdIdentity = lazy.ContextualIdentityService.create(
-            container.name,
-            container.icon,
-            container.color,
-            container.userContextId
-          );
-          if (
-            createdIdentity &&
-            String(createdIdentity.userContextId) !==
-              String(container.userContextId)
-          ) {
-            this.log("Container sync created with unexpected identity ID", {
-              requestedId: container.userContextId,
-              createdId: createdIdentity.userContextId,
-              name: container.name,
-            });
-          }
-        }
-      }
-      for (const container of removals.containers || []) {
-        try {
-          lazy.ContextualIdentityService.remove(container.userContextId);
-        } catch (e) {
-          /* ignore if container doesn't exist */
-        }
-      }
-
-      // 2. Remove deleted items from sidebar arrays
-      const removedSpaceIds = new Set((removals.spaces || []).map(s => s.uuid));
-      const removedTabIds = new Set(
-        (removals.tabs || []).map(t => t.zenSyncId)
-      );
-      const removedFolderIds = new Set(
-        (removals.folders || []).map(f => String(f.id))
-      );
-      if (removedSpaceIds.size) {
-        sidebar.spaces = (sidebar.spaces || []).filter(
-          s => !removedSpaceIds.has(s.uuid)
-        );
-      }
-      if (removedTabIds.size) {
-        sidebar.tabs = (sidebar.tabs || []).filter(
-          t => !removedTabIds.has(t.zenSyncId)
-        );
-      }
-      if (removedFolderIds.size) {
-        sidebar.folders = (sidebar.folders || []).filter(
-          f => !removedFolderIds.has(String(f.id))
-        );
-      }
-
-      // 3. Merge pulled items into sidebar arrays
-      if (pulled.spaces?.length) {
-        const spaceMap = new Map((sidebar.spaces || []).map(s => [s.uuid, s]));
-        for (const space of pulled.spaces) {
-          if (!space.uuid) {
-            continue;
-          }
-          const existing = spaceMap.get(space.uuid);
-          spaceMap.set(
-            space.uuid,
-            existing ? { ...existing, ...space } : space
-          );
-        }
-        sidebar.spaces = Array.from(spaceMap.values());
-        // Sort spaces by the position field from the sync payload
-        sidebar.spaces.sort(
-          (a, b) => (a.position ?? Infinity) - (b.position ?? Infinity)
-        );
-      }
-
-      if (pulled.tabs?.length) {
-        const tabMap = new Map();
-        const noIdTabs = [];
-        for (const tab of sidebar.tabs || []) {
-          if (tab.zenSyncId) {
-            tabMap.set(tab.zenSyncId, tab);
-          } else {
-            noIdTabs.push(tab);
-          }
-        }
-        for (const tab of pulled.tabs) {
-          if (!tab.zenSyncId) {
-            continue;
-          }
-          const existing = tabMap.get(tab.zenSyncId);
-          tabMap.set(tab.zenSyncId, existing ? { ...existing, ...tab } : tab);
-        }
-        const syncedTabs = Array.from(tabMap.values());
-        syncedTabs.sort((a, b) => {
-          const aPosition =
-            typeof a.position === "number"
-              ? a.position
-              : Number.POSITIVE_INFINITY;
-          const bPosition =
-            typeof b.position === "number"
-              ? b.position
-              : Number.POSITIVE_INFINITY;
-          return aPosition - bPosition;
-        });
-        sidebar.tabs = [...noIdTabs, ...syncedTabs];
-      }
-
-      if (pulled.folders?.length) {
-        const folderMap = new Map(
-          (sidebar.folders || []).map(f => [String(f.id), f])
-        );
-        for (const folder of pulled.folders) {
-          if (!folder.id) {
-            continue;
-          }
-          const existing = folderMap.get(String(folder.id));
-          folderMap.set(
-            String(folder.id),
-            existing ? { ...existing, ...folder } : folder
-          );
-        }
-        sidebar.folders = Array.from(folderMap.values());
-      }
-
-      // 4. Apply meta if present (replace groups and splitViewData)
-      if (meta) {
-        sidebar.groups = meta.groups;
-        sidebar.splitViewData = meta.splitViewData;
-      }
-
-      // 5. Persist sidebar to disk
-      this.#sidebar = sidebar;
-      this.#file.data = sidebar;
-      this.#file.saveSoon();
-
-      // Rebuild the snapshot so the next saveState() diff doesn't
-      // re-fire notifications for items we just applied from sync.
-      this._lastSnapshot = this.#buildSnapshot(sidebar);
-
-      // 6. Dispatch to ONE window for live DOM updates
-      const win = Services.wm.getMostRecentWindow("navigator:browser");
-      if (win?.gZenWorkspaces && !win.gZenWorkspaces.privateWindowOrDisabled) {
-        await win.gZenWorkspaces._applySyncChanges(pulled, removals);
-      }
-
-      this.log("Applied multi-record sync data");
-    } catch (e) {
-      console.error(
-        "ZenSessionManager: Failed to apply multi-record sync data:",
-        e
-      );
-    }
-  }
-
-  // Runtime-only tab fields excluded from sync hashing (mirrors STRIP_TAB_FIELDS
-  // in ZenWorkspacesSync plus lastAccessed which changes on every tab switch).
-  static #HASH_STRIP_TAB_FIELDS = [
-    "syncStatus",
-    "scroll",
-    "formdata",
-    "selected",
-    "_zenIsActiveTab",
-    "_zenContentsVisible",
-    "_zenChangeLabelFlag",
-    "lastAccessed",
-  ];
-
-  /**
-   * Builds a snapshot of per-item hashes from the current sidebar state.
-   * Only sync-relevant fields are included so that runtime-only changes
-   * (scroll position, formdata, etc.) don't trigger spurious notifications.
-   *
-   * @param {object} sidebar - The sidebar data to snapshot.
-   * @returns {{ spaces: Map, tabs: Map, folders: Map, metaHash: string }}
-   */
-  #buildSnapshot(sidebar) {
-    const spaces = new Map();
-    const spaceList = sidebar.spaces || [];
-    for (let i = 0; i < spaceList.length; i++) {
-      const s = spaceList[i];
-      if (s.uuid) {
-        // Include array index so reordering is detected.
-        spaces.set(s.uuid, JSON.stringify({ ...s, _pos: i }));
-      }
-    }
-
-    const tabs = new Map();
-    const tabList = sidebar.tabs || [];
-    for (let i = 0; i < tabList.length; i++) {
-      const t = tabList[i];
-      if (t.zenSyncId && !(t.zenIsEmpty && !t.groupId)) {
-        const cleaned = { ...t };
-        for (const field of nsZenSessionManager.#HASH_STRIP_TAB_FIELDS) {
-          delete cleaned[field];
-        }
-        // Include array index so reordering is detected.
-        cleaned._pos = i;
-        tabs.set(t.zenSyncId, JSON.stringify(cleaned));
-      }
-    }
-
-    const folders = new Map();
-    for (const f of sidebar.folders || []) {
-      if (f.id) {
-        const { syncStatus: _s, ...rest } = f;
-        folders.set(String(f.id), JSON.stringify(rest));
-      }
-    }
-
-    const metaHash = JSON.stringify({
-      g: sidebar.groups || [],
-      sv: sidebar.splitViewData || [],
-    });
-
-    return { spaces, tabs, folders, metaHash };
-  }
-
-  /**
-   * Computes per-item hashes and fires "zen-workspace-item-changed" notifications
-   * for items that have changed, been added, or been removed since the last snapshot.
-   *
-   * @param sidebar
-   */
-  #notifyChangedItems(sidebar) {
-    const snapshot = this.#buildSnapshot(sidebar);
-    const prev = this._lastSnapshot;
-
-    if (prev) {
-      // Detect changed/new spaces
-      for (const [uuid, hash] of snapshot.spaces) {
-        if (prev.spaces.get(uuid) !== hash) {
-          Services.obs.notifyObservers(
-            null,
-            "zen-workspace-item-changed",
-            `s~${uuid}`
-          );
-        }
-      }
-      // Detect removed spaces
-      for (const uuid of prev.spaces.keys()) {
-        if (!snapshot.spaces.has(uuid)) {
-          Services.obs.notifyObservers(
-            null,
-            "zen-workspace-item-changed",
-            `s~${uuid}`
-          );
-        }
-      }
-
-      // Detect changed/new tabs
-      for (const [id, hash] of snapshot.tabs) {
-        if (prev.tabs.get(id) !== hash) {
-          Services.obs.notifyObservers(
-            null,
-            "zen-workspace-item-changed",
-            `t~${id}`
-          );
-        }
-      }
-      // Detect removed tabs
-      for (const id of prev.tabs.keys()) {
-        if (!snapshot.tabs.has(id)) {
-          Services.obs.notifyObservers(
-            null,
-            "zen-workspace-item-changed",
-            `t~${id}`
-          );
-        }
-      }
-
-      // Detect changed/new folders
-      for (const [id, hash] of snapshot.folders) {
-        if (prev.folders.get(id) !== hash) {
-          Services.obs.notifyObservers(
-            null,
-            "zen-workspace-item-changed",
-            `f~${id}`
-          );
-        }
-      }
-      // Detect removed folders
-      for (const id of prev.folders.keys()) {
-        if (!snapshot.folders.has(id)) {
-          Services.obs.notifyObservers(
-            null,
-            "zen-workspace-item-changed",
-            `f~${id}`
-          );
-        }
-      }
-
-      // Detect meta changes
-      if (prev.metaHash !== snapshot.metaHash) {
-        Services.obs.notifyObservers(
-          null,
-          "zen-workspace-item-changed",
-          "meta~global"
-        );
-      }
-    }
-
-    this._lastSnapshot = snapshot;
   }
 }
 
