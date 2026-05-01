@@ -1250,8 +1250,7 @@ class nsZenWindowSync {
     const window = aBrowser.ownerGlobal;
     const tab = window?.gBrowser?.getTabForBrowser(aBrowser);
     if (
-      !tab ||
-      !tab.id ||
+      !tab?.id ||
       tab.closing ||
       tab.hasAttribute("zen-empty-tab") ||
       window.gZenWorkspaces?.privateWindowOrDisabled

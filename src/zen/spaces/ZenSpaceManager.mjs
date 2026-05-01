@@ -2139,7 +2139,6 @@ class nsZenWorkspaces {
         );
       }
       this.#propagateWorkspaceData(orderedWorkspaces);
-      await lazy.SessionSaver.run();
     }
   }
 
