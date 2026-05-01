@@ -18,17 +18,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
-// Runtime-only fields that must never be synced.
-const STRIP_TAB_FIELDS = [
-  "syncStatus",
-  "scroll",
-  "formdata",
-  "selected",
-  "_zenIsActiveTab",
-  "_zenContentsVisible",
-  "_zenChangeLabelFlag",
-];
-
 // ---------------------------------------------------------------------------
 // Record
 // ---------------------------------------------------------------------------
@@ -171,21 +160,11 @@ class ZenWorkspacesStore extends Store {
           record.deleted = true;
           return record;
         }
-        const cleaned = { ...tab };
-        for (const field of STRIP_TAB_FIELDS) {
-          delete cleaned[field];
-        }
-        // Trim unpinned tab entries to just the active entry
-        if (!tab.pinned && cleaned.entries?.length) {
-          const entryIndex =
-            typeof cleaned.index === "number"
-              ? Math.max(0, cleaned.index - 1)
-              : 0;
-          const entry = cleaned.entries[entryIndex] || cleaned.entries[0];
-          cleaned.entries = entry ? [entry] : [];
-          cleaned.index = 1;
-        }
-        record.cleartext = { id, type: "tab", ...cleaned, position: idx };
+        const syncableTabData = lazy.ZenSyncStore.createSyncableTabData(tab, {
+          position: idx,
+          trimHistoryForUnpinned: true,
+        });
+        record.cleartext = { id, type: "tab", ...syncableTabData };
         break;
       }
 

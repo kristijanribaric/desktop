@@ -11,31 +11,75 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 class ZenSyncManager {
-  // Runtime-only tab fields excluded from sync hashing. This mirrors the
-  // sync record cleanup plus lastAccessed, which changes on every tab switch.
-  static #HASH_STRIP_TAB_FIELDS = [
-    "syncStatus",
-    "scroll",
-    "formdata",
-    "selected",
-    "_zenIsActiveTab",
-    "_zenContentsVisible",
-    "_zenChangeLabelFlag",
-    "lastAccessed",
-  ];
-
   _lastSnapshot = null;
 
   getCurrentSidebarData() {
-    return lazy.ZenSessionStore.getCurrentSidebarData();
+    return this.#normalizeSidebarForSync(
+      lazy.ZenSessionStore.getCurrentSidebarData(),
+    );
+  }
+
+  createSyncableTabData(
+    tabData,
+    { position, trimHistoryForUnpinned = false } = {},
+  ) {
+    if (!tabData?.zenSyncId) {
+      return null;
+    }
+
+    const pinned = !!tabData.pinned;
+    let entries = Array.isArray(tabData.entries) ? [...tabData.entries] : [];
+    let index = typeof tabData.index === "number" ? tabData.index : 1;
+
+    if (trimHistoryForUnpinned && !pinned && entries.length) {
+      const entryIndex = Math.max(0, index - 1);
+      const entry = entries[entryIndex] || entries[0];
+      entries = entry ? [entry] : [];
+      index = 1;
+    }
+
+    const isEssential = !!tabData.zenEssential;
+    const syncTabData = {
+      entries,
+      groupId: tabData.groupId || null,
+      image: typeof tabData.image === "string" ? tabData.image : "",
+      index,
+      pinned,
+      userContextId: parseInt(tabData.userContextId, 10) || 0,
+      zenDefaultUserContextId: !!tabData.zenDefaultUserContextId,
+      zenEssential: isEssential,
+      zenHasStaticIcon: !!tabData.zenHasStaticIcon,
+      zenIsEmpty: !!tabData.zenIsEmpty,
+      zenSyncId: tabData.zenSyncId,
+      zenWorkspace: isEssential ? null : tabData.zenWorkspace || null,
+    };
+
+    if (typeof tabData.zenStaticLabel === "string") {
+      syncTabData.zenStaticLabel = tabData.zenStaticLabel;
+    }
+    if (tabData.zenLiveFolderItemId) {
+      syncTabData.zenLiveFolderItemId = tabData.zenLiveFolderItemId;
+    }
+    if (tabData._zenPinnedInitialState) {
+      syncTabData._zenPinnedInitialState = tabData._zenPinnedInitialState;
+    }
+    if (typeof position === "number") {
+      syncTabData.position = position;
+    }
+
+    return syncTabData;
   }
 
   seedSnapshot(sidebar) {
-    this._lastSnapshot = this.#buildSnapshot(sidebar || {});
+    this._lastSnapshot = this.#buildSnapshot(
+      this.#normalizeSidebarForSync(sidebar || {}),
+    );
   }
 
   noteSidebarDataChanged(sidebar) {
-    const snapshot = this.#buildSnapshot(sidebar || {});
+    const snapshot = this.#buildSnapshot(
+      this.#normalizeSidebarForSync(sidebar || {}),
+    );
     const prev = this._lastSnapshot;
 
     if (prev) {
@@ -60,7 +104,8 @@ class ZenSyncManager {
       }
 
       for (const [id, hash] of snapshot.tabs) {
-        if (prev.tabs.get(id) !== hash) {
+        const prevHash = prev.tabs.get(id);
+        if (prevHash !== hash) {
           Services.obs.notifyObservers(
             null,
             "zen-workspace-item-changed",
@@ -287,6 +332,78 @@ class ZenSyncManager {
     }
   }
 
+  #normalizeSidebarForSync(sidebar) {
+    return {
+      ...sidebar,
+      tabs: this.#getStableSyncTabOrder(sidebar)
+        .map(tab => this.createSyncableTabData(tab))
+        .filter(Boolean),
+    };
+  }
+
+  #getStableSyncTabOrder(sidebar) {
+    const tabs = [...(sidebar.tabs || [])];
+    if (!tabs.length) {
+      return tabs;
+    }
+
+    const folderWorkspaceIds = new Map(
+      (sidebar.folders || [])
+        .filter(folder => folder?.id)
+        .map(folder => [String(folder.id), folder.workspaceId || null]),
+    );
+
+    const workspaceOrder = new Map(
+      [...(sidebar.spaces || [])]
+        .map((space, index) => ({ space, index }))
+        .sort((a, b) => {
+          const aPosition =
+            typeof a.space?.position === "number"
+              ? a.space.position
+              : Number.POSITIVE_INFINITY;
+          const bPosition =
+            typeof b.space?.position === "number"
+              ? b.space.position
+              : Number.POSITIVE_INFINITY;
+          return aPosition - bPosition || a.index - b.index;
+        })
+        .map(({ space }, index) => [space.uuid, index]),
+    );
+
+    const getTabSection = tab => {
+      if (tab.zenEssential) {
+        return 0;
+      }
+      if (tab.pinned) {
+        return 1;
+      }
+      return 2;
+    };
+
+    const getTabWorkspaceOrder = tab => {
+      const workspaceId =
+        tab.zenWorkspace ||
+        (tab.groupId ? folderWorkspaceIds.get(String(tab.groupId)) : null);
+      return workspaceOrder.get(workspaceId) ?? Number.POSITIVE_INFINITY;
+    };
+
+    return tabs
+      .map((tab, index) => ({
+        tab,
+        index,
+        section: getTabSection(tab),
+        workspaceOrder: getTabWorkspaceOrder(tab),
+      }))
+      .sort((a, b) => {
+        return (
+          a.section - b.section ||
+          a.workspaceOrder - b.workspaceOrder ||
+          a.index - b.index
+        );
+      })
+      .map(({ tab }) => tab);
+  }
+
   #buildSnapshot(sidebar) {
     const spaces = new Map();
     const spaceList = sidebar.spaces || [];
@@ -302,11 +419,7 @@ class ZenSyncManager {
     for (let i = 0; i < tabList.length; i++) {
       const tab = tabList[i];
       if (tab.zenSyncId && !(tab.zenIsEmpty && !tab.groupId)) {
-        const cleaned = { ...tab, _pos: i };
-        for (const field of ZenSyncManager.#HASH_STRIP_TAB_FIELDS) {
-          delete cleaned[field];
-        }
-        tabs.set(tab.zenSyncId, JSON.stringify(cleaned));
+        tabs.set(tab.zenSyncId, JSON.stringify({ ...tab, _pos: i }));
       }
     }
 

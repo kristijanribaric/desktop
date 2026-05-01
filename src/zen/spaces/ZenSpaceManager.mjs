@@ -3181,7 +3181,7 @@ class nsZenWorkspaces {
       for (const tab of gBrowser.tabs) {
         if (
           !tab.hasAttribute("zen-workspace-id") &&
-          !tab.hasAttribute("zen-workspace-id")
+          !tab.hasAttribute("zen-essential")
         ) {
           tab.setAttribute("zen-workspace-id", workspace.uuid);
         }

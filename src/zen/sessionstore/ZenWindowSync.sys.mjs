@@ -255,7 +255,6 @@ class nsZenWindowSync {
     for (let eventName of EVENTS) {
       aWindow.addEventListener(eventName, this, true);
     }
-    aWindow.gBrowser.addTabsProgressListener(this);
     this.#maybeTriggerInitialTabSync(aWindow);
   }
 
@@ -1230,37 +1229,6 @@ class nsZenWindowSync {
       : { entries: [] };
   }
 
-  onLocationChange(
-    aBrowser,
-    aWebProgress,
-    aRequest,
-    aLocationURI,
-    aFlags,
-    aIsSimulated = false
-  ) {
-    if (
-      aIsSimulated ||
-      !aBrowser ||
-      !aLocationURI ||
-      aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SESSION_STORE
-    ) {
-      return;
-    }
-
-    const window = aBrowser.ownerGlobal;
-    const tab = window?.gBrowser?.getTabForBrowser(aBrowser);
-    if (
-      !tab?.id ||
-      tab.closing ||
-      tab.hasAttribute("zen-empty-tab") ||
-      window.gZenWorkspaces?.privateWindowOrDisabled
-    ) {
-      return;
-    }
-
-    this.#notifySyncItemChanged(tab);
-  }
-
   /**
    * Flushes the tab state for a given tab if it has a linked browser.
    *
@@ -1651,7 +1619,6 @@ class nsZenWindowSync {
     for (let eventName of EVENTS) {
       window.removeEventListener(eventName, this);
     }
-    window.gBrowser?.removeTabsProgressListener(this);
     delete window.gZenWindowSync;
     this.#moveAllActiveTabsToOtherWindowsForClose(window);
   }
