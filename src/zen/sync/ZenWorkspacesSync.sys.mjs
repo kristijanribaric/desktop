@@ -13,7 +13,7 @@ import { SCORE_INCREMENT_XLARGE } from "resource://services-sync/constants.sys.m
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
+  ZenSyncStore: "resource:///modules/zen/ZenSyncManager.sys.mjs",
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
@@ -87,7 +87,7 @@ class ZenWorkspacesStore extends Store {
 
   async getAllIDs() {
     const ids = {};
-    const sidebar = lazy.ZenSessionStore.getSidebarData();
+    const sidebar = lazy.ZenSyncStore.getCurrentSidebarData();
 
     for (const space of sidebar.spaces || []) {
       if (space.uuid) {
@@ -120,7 +120,7 @@ class ZenWorkspacesStore extends Store {
     if (!parsed) {
       return false;
     }
-    const sidebar = lazy.ZenSessionStore.getSidebarData();
+    const sidebar = lazy.ZenSyncStore.getCurrentSidebarData();
 
     switch (parsed.type) {
       case "space":
@@ -148,7 +148,7 @@ class ZenWorkspacesStore extends Store {
       return record;
     }
 
-    const sidebar = lazy.ZenSessionStore.getSidebarData();
+    const sidebar = lazy.ZenSyncStore.getCurrentSidebarData();
 
     switch (parsed.type) {
       case "space": {
@@ -280,7 +280,7 @@ class ZenWorkspacesStore extends Store {
     // feedback loops where applied items get re-uploaded immediately.
     this.engine._tracker.ignoreAll = true;
     try {
-      await lazy.ZenSessionStore.applyMultiRecordSync(pulled, removals, meta);
+      await lazy.ZenSyncStore.applyIncomingBatch(pulled, removals, meta);
     } finally {
       this.engine._tracker.ignoreAll = false;
     }
@@ -322,7 +322,7 @@ class ZenWorkspacesStore extends Store {
       if (record.deleted) {
         const removals = { spaces: [], tabs: [], folders: [], containers: [] };
         this._collectRemoval(record.id, removals);
-        await lazy.ZenSessionStore.applyMultiRecordSync(
+        await lazy.ZenSyncStore.applyIncomingBatch(
           { spaces: [], tabs: [], folders: [], containers: [] },
           removals,
           null
@@ -356,7 +356,7 @@ class ZenWorkspacesStore extends Store {
           };
           break;
       }
-      await lazy.ZenSessionStore.applyMultiRecordSync(
+      await lazy.ZenSyncStore.applyIncomingBatch(
         pulled,
         { spaces: [], tabs: [], folders: [], containers: [] },
         meta

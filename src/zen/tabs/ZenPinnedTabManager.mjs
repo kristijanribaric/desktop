@@ -114,9 +114,44 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
     tab.style.setProperty("--zen-essential-tab-icon", `url(${iconUrl})`);
   }
 
+  #getDefaultWorkspaceUserContextId(tab) {
+    if (!tab) {
+      return 0;
+    }
+
+    if (tab.hasAttribute("zen-essential")) {
+      const container =
+        gZenWorkspaces.getEssentialsSection(tab)?.getAttribute("container");
+      return parseInt(container, 10) || 0;
+    }
+
+    const workspaceId =
+      tab.getAttribute("zen-workspace-id") ||
+      tab.group?.getAttribute("zen-workspace-id") ||
+      tab.closest("zen-workspace")?.id ||
+      gZenWorkspaces.activeWorkspace;
+
+    return (
+      parseInt(
+        gZenWorkspaces.getWorkspaceFromId(workspaceId)?.containerTabId,
+        10
+      ) || 0
+    );
+  }
+
   syncDefaultUserContextId(tab) {
-    const userContextId = parseInt(tab?.getAttribute("usercontextid"), 10) || 0;
-    tab?.toggleAttribute("zenDefaultUserContextId", userContextId === 0);
+    if (!tab) {
+      return;
+    }
+
+    const userContextId = parseInt(tab.getAttribute("usercontextid"), 10) || 0;
+    const defaultWorkspaceUserContextId =
+      this.#getDefaultWorkspaceUserContextId(tab);
+
+    tab.toggleAttribute(
+      "zenDefaultUserContextId",
+      userContextId === defaultWorkspaceUserContextId
+    );
   }
 
   _onTabResetPinButton(event, tab) {
@@ -563,11 +598,10 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
     document.getElementById("tabContextMenu").appendChild(elements);
 
     const element = window.MozXULElement.parseXULToFragment(`
-            <menuitem id="context_zen-add-essential"
-                      data-l10n-id="tab-context-zen-add-essential"
-                      hidden="true"
-                      disabled="true"
-                      command="cmd_contextZenAddToEssentials"/>
+             <menuitem id="context_zen-add-essential"
+                       data-l10n-id="tab-context-zen-add-essential"
+                       hidden="true"
+                       command="cmd_contextZenAddToEssentials"/>
             <menuitem id="context_zen-remove-essential"
                       data-lazy-l10n-id="tab-context-zen-remove-essential"
                       hidden="true"
@@ -642,7 +676,6 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
       .then(badgeText => {
         zenAddEssential.setAttribute("badge", badgeText);
       });
-    zenAddEssential.toggleAttribute("disabled", !canAddEssential);
     document
       .getElementById("cmd_contextZenAddToEssentials")
       .toggleAttribute("disabled", !canAddEssential);

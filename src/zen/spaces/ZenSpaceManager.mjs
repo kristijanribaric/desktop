@@ -215,12 +215,7 @@ class nsZenWorkspaces {
   }
 
   #getSyncedTabState(tab) {
-    try {
-      return JSON.parse(SessionStore.getTabState(tab));
-    } catch (error) {
-      console.error("gZenWorkspaces: Failed to read current tab state", error);
-      return null;
-    }
+    return JSON.parse(SessionStore.getTabState(tab));
   }
 
   #getSyncedTabUserContextId(tabData) {

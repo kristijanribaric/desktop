@@ -961,6 +961,19 @@ export class nsZenSessionManager {
     return JSON.parse(JSON.stringify(sidebar));
   }
 
+  getCurrentSidebarData() {
+    const state = lazy.SessionStore.getCurrentState(true);
+    let windows = state?.windows || [];
+    windows = windows.filter(win => this.#isWindowSaveable(win));
+    if (!windows.length) {
+      return this.getSidebarData();
+    }
+
+    const sidebarData = { lastCollected: Date.now() };
+    this.#collectTabsData(sidebarData, windows);
+    return JSON.parse(JSON.stringify(sidebarData));
+  }
+
   /**
    * Applies incoming sync data. Called by the ZenWorkspacesStore
    * after classifying all incoming records by type.

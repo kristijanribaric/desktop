@@ -467,9 +467,6 @@ class nsZenLiveFoldersManager {
         });
         // createLazyBrowser can't be pinned by default
         this.window.gBrowser.pinTab(tab);
-        if (userContextId) {
-          tab.setAttribute("zenDefaultUserContextId", "true");
-        }
         if (item.icon) {
           this.window.gBrowser.setIcon(tab, item.icon);
           if (tab.linkedBrowser) {
@@ -496,6 +493,9 @@ class nsZenLiveFoldersManager {
     // Wait for tabs to (hopefully) be initialized on all windows
     lazy.setTimeout(() => {
       folder.addTabs(newItems);
+      for (const tab of newItems) {
+        this.window.gZenPinnedTabManager?.syncDefaultUserContextId(tab);
+      }
       this.saveState();
     }, 0);
   }

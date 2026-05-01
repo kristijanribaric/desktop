@@ -172,13 +172,11 @@ export class nsZenFolder extends MozTabbrowserTabGroup {
   }
 
   async delete() {
-    if (this.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `f~${this.id}`
-      );
-    }
+    Services.obs.notifyObservers(
+      null,
+      "zen-workspace-item-changed",
+      `f~${this.id}`
+    );
     for (const tab of this.allItemsRecursive) {
       if (tab.hasAttribute("zen-empty-tab")) {
         // Manually remove the empty tabs as removeTabs() inside removeTabGroup

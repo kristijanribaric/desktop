@@ -10,14 +10,11 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
-  BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
-  SessionSaver: "resource:///modules/sessionstore/SessionSaver.sys.mjs",
   TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
   TabStateCache: "resource:///modules/sessionstore/TabStateCache.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   RunState: "resource:///modules/sessionstore/RunState.sys.mjs",
-  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -57,6 +54,7 @@ const EVENTS = [
   "TabAddedToEssentials",
   "TabRemovedFromEssentials",
 
+  "TabGrouped",
   "TabUngrouped",
   "TabGroupUpdate",
   "TabGroupCreate",
@@ -1193,6 +1191,29 @@ class nsZenWindowSync {
     this.#syncItemForAllWindows(item, flags);
   }
 
+  #notifySyncItemChanged(item) {
+    if (!item?.id) {
+      return;
+    }
+
+    if (item.isZenFolder) {
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `f~${item.id}`,
+      );
+      return;
+    }
+
+    if (item.ownerGlobal?.gBrowser?.isTab(item)) {
+      Services.obs.notifyObservers(
+        null,
+        "zen-workspace-item-changed",
+        `t~${item.id}`,
+      );
+    }
+  }
+
   /**
    * Retrieves the tab state entries from the cache for a given tab.
    *
@@ -1209,17 +1230,7 @@ class nsZenWindowSync {
       : { entries: [] };
   }
 
-  #getActiveEntryUrl(tabData) {
-    const entries = tabData?.entries || [];
-    if (entries.length) {
-      const entryIndex =
-        typeof tabData.index === "number" ? Math.max(0, tabData.index - 1) : 0;
-      return entries[entryIndex]?.url || entries[0]?.url || "";
-    }
-    return tabData?._zenPinnedInitialState?.entry?.url || "";
-  }
-
-  async onLocationChange(
+  onLocationChange(
     aBrowser,
     aWebProgress,
     aRequest,
@@ -1231,8 +1242,6 @@ class nsZenWindowSync {
       aIsSimulated ||
       !aBrowser ||
       !aLocationURI ||
-      (aLocationURI.spec === "about:blank" &&
-        lazy.BrowserUIUtils.checkEmptyPageOrigin(aBrowser)) ||
       aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SESSION_STORE
     ) {
       return;
@@ -1250,24 +1259,7 @@ class nsZenWindowSync {
       return;
     }
 
-    await lazy.TabStateFlusher.flush(aBrowser);
-
-    const { entries, index } = this.#getTabEntriesFromCache(tab);
-    const currentURL = this.#getActiveEntryUrl({ entries, index });
-    if (!currentURL) {
-      return;
-    }
-
-    const sidebarTab = lazy.ZenSessionStore.getSidebarData().tabs?.find(
-      savedTab => savedTab.zenSyncId === tab.id
-    );
-    const savedURL = this.#getActiveEntryUrl(sidebarTab);
-
-    if (currentURL === savedURL) {
-      return;
-    }
-
-    await lazy.SessionSaver.run();
+    this.#notifySyncItemChanged(tab);
   }
 
   /**
@@ -1443,9 +1435,8 @@ class nsZenWindowSync {
       return;
     }
     this.#runOnAllWindows(window, win => {
-      // If a tab with this id already exists in the other window (e.g. it was
-      // placed there by Firefox Sync before ZenWindowSync ran), sync its
-      // attributes/position instead of creating a duplicate.
+      // If a tab with this id already exists in the other window, sync its
+      // attributes and position instead of creating a duplicate.
       const existingTab = tab.id ? this.getItemFromWindow(win, tab.id) : null;
       if (existingTab) {
         this.#syncItemWithOriginal(
@@ -1532,13 +1523,7 @@ class nsZenWindowSync {
   on_TabShow(aEvent) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
-    if (tab.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${tab.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tab);
     if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
       return;
     }
@@ -1552,26 +1537,14 @@ class nsZenWindowSync {
 
   on_TabMove(aEvent) {
     const item = aEvent.target;
-    if (item.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${item.id}`
-      );
-    }
+    this.#notifySyncItemChanged(item);
     this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_MOVE);
     return Promise.resolve();
   }
 
   on_TabPinned(aEvent) {
     const tab = aEvent.target;
-    if (tab.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${tab.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tab);
     // There are cases where the pinned state is changed but we don't
     // wan't to override the initial state we stored when the tab was created.
     // For example, when session restore pins a tab again.
@@ -1594,13 +1567,7 @@ class nsZenWindowSync {
 
   on_TabUnpinned(aEvent) {
     const tab = aEvent.target;
-    if (tab.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${tab.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tab);
     this.#runOnAllWindows(null, win => {
       const targetTab = this.getItemFromWindow(win, tab.id);
       if (targetTab) {
@@ -1616,38 +1583,20 @@ class nsZenWindowSync {
 
   on_TabAddedToEssentials(aEvent) {
     const tab = aEvent.target;
-    if (tab.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${tab.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tab);
     return this.on_TabMove(aEvent);
   }
 
   on_TabRemovedFromEssentials(aEvent) {
     const tab = aEvent.target;
-    if (tab.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${tab.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tab);
     return this.on_TabMove(aEvent);
   }
 
   on_TabClose(aEvent) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
-    if (tab.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${tab.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tab);
     this.#runOnAllWindows(window, win => {
       const targetTab = this.getItemFromWindow(win, tab.id);
       if (targetTab) {
@@ -1757,13 +1706,7 @@ class nsZenWindowSync {
       // This tab group was opened as part of a sync operation.
       return;
     }
-    if (tabGroup.isZenFolder && tabGroup.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `f~${tabGroup.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tabGroup);
     Services.obs.notifyObservers(
       null,
       "zen-workspace-item-changed",
@@ -1802,13 +1745,7 @@ class nsZenWindowSync {
 
   on_TabGroupRemoved(aEvent) {
     const tabGroup = aEvent.target;
-    if (tabGroup.isZenFolder && tabGroup.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `f~${tabGroup.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tabGroup);
     Services.obs.notifyObservers(
       null,
       "zen-workspace-item-changed",
@@ -1829,42 +1766,37 @@ class nsZenWindowSync {
 
   on_TabGroupMoved(aEvent) {
     const tabGroup = aEvent.target;
-    if (tabGroup.isZenFolder && tabGroup.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `f~${tabGroup.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tabGroup);
     Services.obs.notifyObservers(
       null,
       "zen-workspace-item-changed",
       "meta~global"
     );
-    return this.on_TabMove(aEvent);
+    this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_MOVE);
+    return Promise.resolve();
   }
 
   on_TabGroupUpdate(aEvent) {
     const tabGroup = aEvent.target;
-    if (tabGroup.isZenFolder && tabGroup.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `f~${tabGroup.id}`
-      );
-    }
+    this.#notifySyncItemChanged(tabGroup);
     return this.#delegateGenericSyncEvent(
       aEvent,
       SYNC_FLAG_ICON | SYNC_FLAG_LABEL
     );
   }
 
-  on_TabUngrouped() {
-    // No need to sync anything when a tab is ungrouped, since on_TabMove will take
-    // care of moving the tab to the correct position. We still need to listen to this
-    // in order to throw sync events for other components such as live folders to
-    // update their state, but we don't need to do anything here.
-    return Promise.resolve();
+  on_TabGrouped(aEvent) {
+    if (!aEvent.detail) {
+      return Promise.resolve();
+    }
+    return this.on_TabMove({ target: aEvent.detail });
+  }
+
+  on_TabUngrouped(aEvent) {
+    if (!aEvent.detail) {
+      return Promise.resolve();
+    }
+    return this.on_TabMove({ target: aEvent.detail });
   }
 
   on_ZenTabRemovedFromSplit(aEvent) {

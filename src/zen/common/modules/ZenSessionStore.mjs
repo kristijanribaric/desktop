@@ -36,10 +36,8 @@ class ZenSessionStore extends nsZenPreloadedFeature {
     if (tabData.zenEssential) {
       tab.setAttribute("zen-essential", "true");
     }
-    if (tabData.zenDefaultUserContextId && !(tabData.userContextId || 0)) {
+    if (tabData.zenDefaultUserContextId) {
       tab.setAttribute("zenDefaultUserContextId", "true");
-    } else {
-      tab.removeAttribute("zenDefaultUserContextId");
     }
     if (tabData._zenPinnedInitialState) {
       tab._zenPinnedInitialState = tabData._zenPinnedInitialState;
