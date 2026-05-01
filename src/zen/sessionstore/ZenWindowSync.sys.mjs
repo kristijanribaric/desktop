@@ -1200,7 +1200,7 @@ class nsZenWindowSync {
       Services.obs.notifyObservers(
         null,
         "zen-workspace-item-changed",
-        `f~${item.id}`,
+        `f~${item.id}`
       );
       return;
     }
@@ -1209,7 +1209,7 @@ class nsZenWindowSync {
       Services.obs.notifyObservers(
         null,
         "zen-workspace-item-changed",
-        `t~${item.id}`,
+        `t~${item.id}`
       );
     }
   }

@@ -120,8 +120,9 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
     }
 
     if (tab.hasAttribute("zen-essential")) {
-      const container =
-        gZenWorkspaces.getEssentialsSection(tab)?.getAttribute("container");
+      const container = gZenWorkspaces
+        .getEssentialsSection(tab)
+        ?.getAttribute("container");
       return parseInt(container, 10) || 0;
     }
 
