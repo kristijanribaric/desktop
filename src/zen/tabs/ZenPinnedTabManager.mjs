@@ -667,7 +667,6 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
       }
     });
     zenAddEssential.hidden = isEssential || !!contextTab.group;
-    const canAddEssential = this.canEssentialBeAdded(contextTab);
     document.l10n
       .formatValue("tab-context-zen-add-essential-badge", {
         num: gBrowser._numZenEssentials,
@@ -678,7 +677,7 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
       });
     document
       .getElementById("cmd_contextZenAddToEssentials")
-      .toggleAttribute("disabled", !canAddEssential);
+      .toggleAttribute("disabled", !this.canEssentialBeAdded(contextTab));
     document.getElementById("context_closeTab").hidden =
       contextTab.hasAttribute("zen-essential");
     document.getElementById("context_zen-remove-essential").hidden =
