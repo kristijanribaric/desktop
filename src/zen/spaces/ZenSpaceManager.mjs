@@ -449,14 +449,6 @@ class nsZenWorkspaces {
           container.insertBefore(folder, container.firstChild);
           return;
         }
-
-        const separator = container.querySelector(
-          ".pinned-tabs-container-separator"
-        );
-        if (separator?.parentNode === container && separator !== folder) {
-          container.insertBefore(folder, separator);
-          return;
-        }
         container.insertBefore(folder, container.firstChild);
       });
     }

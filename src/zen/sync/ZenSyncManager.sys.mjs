@@ -115,7 +115,10 @@ class ZenSyncManager {
     try {
       let sidebar = lazy.ZenSessionStore.getSidebarData();
 
-      this.#applyIncomingContainers(pulled.containers || [], removals.containers || []);
+      this.#applyIncomingContainers(
+        pulled.containers || [],
+        removals.containers || []
+      );
       this.#removeDeletedItems(sidebar, removals);
       this.#mergeIncomingItems(sidebar, pulled);
 
@@ -167,7 +170,8 @@ class ZenSyncManager {
       );
       if (
         createdIdentity &&
-        String(createdIdentity.userContextId) !== String(container.userContextId)
+        String(createdIdentity.userContextId) !==
+          String(container.userContextId)
       ) {
         console.warn("ZenSyncManager: Container sync created unexpected ID", {
           requestedId: container.userContextId,
@@ -214,7 +218,9 @@ class ZenSyncManager {
 
   #mergeIncomingItems(sidebar, pulled) {
     if (pulled.spaces?.length) {
-      const spaceMap = new Map((sidebar.spaces || []).map(space => [space.uuid, space]));
+      const spaceMap = new Map(
+        (sidebar.spaces || []).map(space => [space.uuid, space])
+      );
       for (const space of pulled.spaces) {
         if (!space.uuid) {
           continue;
@@ -251,9 +257,13 @@ class ZenSyncManager {
       const syncedTabs = Array.from(tabMap.values());
       syncedTabs.sort((a, b) => {
         const aPosition =
-          typeof a.position === "number" ? a.position : Number.POSITIVE_INFINITY;
+          typeof a.position === "number"
+            ? a.position
+            : Number.POSITIVE_INFINITY;
         const bPosition =
-          typeof b.position === "number" ? b.position : Number.POSITIVE_INFINITY;
+          typeof b.position === "number"
+            ? b.position
+            : Number.POSITIVE_INFINITY;
         return aPosition - bPosition;
       });
       sidebar.tabs = [...noIdTabs, ...syncedTabs];
