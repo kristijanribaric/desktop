@@ -612,6 +612,7 @@ export class nsZenSessionManager {
     );
     this.#collectWindowData(windows);
     lazy.ZenSyncStore.noteSidebarDataChanged(this.#sidebar);
+    // This would save the data to disk asynchronously or when quitting the app.
     let sidebar = this.#sidebarWithoutCloning;
     this.#file.data = sidebar;
     if (soon) {
