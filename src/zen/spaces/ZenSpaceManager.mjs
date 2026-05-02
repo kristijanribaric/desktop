@@ -222,6 +222,18 @@ class nsZenWorkspaces {
     return parseInt(tabData?.userContextId, 10) || 0;
   }
 
+  #applyIncomingTabDefaultUserContextId(tab, tabData) {
+    if (!tab || !gBrowser.isTab(tab)) {
+      return;
+    }
+
+    if (tabData?.zenDefaultUserContextId) {
+      tab.setAttribute("zenDefaultUserContextId", "true");
+    } else {
+      tab.removeAttribute("zenDefaultUserContextId");
+    }
+  }
+
   #applyIncomingTabContainer(tab, tabData) {
     if (!tab || !gBrowser.isTab(tab)) {
       return;
@@ -512,6 +524,15 @@ class nsZenWorkspaces {
     this.updateTabsContainers();
   }
 
+  #syncIncomingTabDefaultUserContextIds(tabDataList) {
+    for (const tabData of tabDataList) {
+      const tab = document.getElementById(tabData?.zenSyncId);
+      if (tab && gBrowser.isTab(tab)) {
+        this.#applyIncomingTabDefaultUserContextId(tab, tabData);
+      }
+    }
+  }
+
   /**
    * Removes folders and tabs that were previously synced but are absent
    * from the latest incoming sync payload.
@@ -684,7 +705,7 @@ class nsZenWorkspaces {
           }
         }
 
-        gZenPinnedTabManager.syncDefaultUserContextId(existingTab);
+        this.#applyIncomingTabDefaultUserContextId(existingTab, tabData);
 
         // Visual updates.
         if (
@@ -780,7 +801,7 @@ class nsZenWorkspaces {
           gZenPinnedTabManager.addToEssentials(newTab, { force: true });
           // Restore the tab's session state (URL / history) from pinnedInitialState.
           gZenPinnedTabManager.resetPinnedTab(newTab);
-          gZenPinnedTabManager.syncDefaultUserContextId(newTab);
+          this.#applyIncomingTabDefaultUserContextId(newTab, tabData);
         } else {
           // restoreInitialTabData sets workspace-id, static label/icon, and
           // _zenPinnedInitialState (preventing ZenWindowSync from overwriting
@@ -816,7 +837,7 @@ class nsZenWorkspaces {
               folder.addTabs([newTab]);
             }
           }
-          gZenPinnedTabManager.syncDefaultUserContextId(newTab);
+          this.#applyIncomingTabDefaultUserContextId(newTab, tabData);
         }
       } else {
         // --- UNPINNED TAB CREATION ---
@@ -846,7 +867,7 @@ class nsZenWorkspaces {
             folder.addTabs([newTab]);
           }
         }
-        gZenPinnedTabManager.syncDefaultUserContextId(newTab);
+        this.#applyIncomingTabDefaultUserContextId(newTab, tabData);
       }
     }
 

@@ -604,9 +604,12 @@ class nsZenWindowSync {
     }
 
     if (isTab) {
+      if (aOriginalItem.hasAttribute("zenDefaultUserContextId")) {
+        aTargetItem.setAttribute("zenDefaultUserContextId", aOriginalItem.getAttribute("zenDefaultUserContextId"));
+      }
+
       if (
-        originalUserContextId !== targetUserContextId &&
-        typeof aTargetItem.setUserContextId === "function"
+        originalUserContextId !== targetUserContextId
       ) {
         aTargetItem.setUserContextId(originalUserContextId);
       }
@@ -636,9 +639,7 @@ class nsZenWindowSync {
       isPinned: originalIsPinned,
     });
 
-    if (isTab) {
-      gZenPinnedTabManager.syncDefaultUserContextId(aTargetItem);
-    }
+
   }
 
   /**

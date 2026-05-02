@@ -493,9 +493,6 @@ class nsZenLiveFoldersManager {
     // Wait for tabs to (hopefully) be initialized on all windows
     lazy.setTimeout(() => {
       folder.addTabs(newItems);
-      for (const tab of newItems) {
-        this.window.gZenPinnedTabManager?.syncDefaultUserContextId(tab);
-      }
       this.saveState();
     }, 0);
   }

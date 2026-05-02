@@ -114,47 +114,6 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
     tab.style.setProperty("--zen-essential-tab-icon", `url(${iconUrl})`);
   }
 
-  #getDefaultWorkspaceUserContextId(tab) {
-    if (!tab) {
-      return 0;
-    }
-
-    if (tab.hasAttribute("zen-essential")) {
-      const container = gZenWorkspaces
-        .getEssentialsSection(tab)
-        ?.getAttribute("container");
-      return parseInt(container, 10) || 0;
-    }
-
-    const workspaceId =
-      tab.getAttribute("zen-workspace-id") ||
-      tab.group?.getAttribute("zen-workspace-id") ||
-      tab.closest("zen-workspace")?.id ||
-      gZenWorkspaces.activeWorkspace;
-
-    return (
-      parseInt(
-        gZenWorkspaces.getWorkspaceFromId(workspaceId)?.containerTabId,
-        10
-      ) || 0
-    );
-  }
-
-  syncDefaultUserContextId(tab) {
-    if (!tab) {
-      return;
-    }
-
-    const userContextId = parseInt(tab.getAttribute("usercontextid"), 10) || 0;
-    const defaultWorkspaceUserContextId =
-      this.#getDefaultWorkspaceUserContextId(tab);
-
-    tab.toggleAttribute(
-      "zenDefaultUserContextId",
-      userContextId === defaultWorkspaceUserContextId
-    );
-  }
-
   _onTabResetPinButton(event, tab) {
     event.stopPropagation();
     if (event.getModifierState("Accel")) {
@@ -524,7 +483,6 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
         gBrowser.pinTab(tab);
         this._ignoreNextTabPinnedEvent = true;
       }
-      this.syncDefaultUserContextId(tab);
       if (tab.selected) {
         gZenWorkspaces.switchTabIfNeeded(tab);
       }
@@ -569,7 +527,6 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
           pinContainer.prepend(tab);
         });
       }
-      this.syncDefaultUserContextId(tab);
       // Dispatch the event to update the UI
       const event = new CustomEvent("TabRemovedFromEssentials", {
         detail: { tab },
