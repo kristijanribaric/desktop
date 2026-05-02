@@ -85,7 +85,7 @@ class ZenWorkspacesStore extends Store {
     }
 
     for (const tab of sidebar.tabs || []) {
-      if (tab.zenSyncId && !(tab.zenIsEmpty && !tab.groupId)) {
+      if (tab.zenSyncId) {
         ids[`t~${tab.zenSyncId}`] = true;
       }
     }

@@ -10,7 +10,6 @@ import { ZenSpacesSwipe } from "resource:///modules/zen/ZenSpacesSwipe.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  SessionSaver: "resource:///modules/sessionstore/SessionSaver.sys.mjs",
   ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
 });
 
@@ -1405,8 +1404,10 @@ class nsZenWorkspaces {
 
   #normalizeWorkspacePositions(workspaces = []) {
     return workspaces.map((workspace, index) => {
-      workspace.position = index;
-      return workspace;
+      return {
+        ...workspace,
+        position: index,
+      };
     });
   }
 

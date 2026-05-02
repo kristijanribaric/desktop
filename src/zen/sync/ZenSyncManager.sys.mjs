@@ -23,7 +23,11 @@ class ZenSyncManager {
     tabData,
     { position, trimHistoryForUnpinned = false } = {},
   ) {
-    if (!tabData?.zenSyncId) {
+    if (
+      !tabData?.zenSyncId ||
+      tabData.zenIsEmpty ||
+      tabData.zenLiveFolderItemId
+    ) {
       return null;
     }
 
@@ -49,16 +53,12 @@ class ZenSyncManager {
       zenDefaultUserContextId: !!tabData.zenDefaultUserContextId,
       zenEssential: isEssential,
       zenHasStaticIcon: !!tabData.zenHasStaticIcon,
-      zenIsEmpty: !!tabData.zenIsEmpty,
       zenSyncId: tabData.zenSyncId,
       zenWorkspace: isEssential ? null : tabData.zenWorkspace || null,
     };
 
     if (typeof tabData.zenStaticLabel === "string") {
       syncTabData.zenStaticLabel = tabData.zenStaticLabel;
-    }
-    if (tabData.zenLiveFolderItemId) {
-      syncTabData.zenLiveFolderItemId = tabData.zenLiveFolderItemId;
     }
     if (tabData._zenPinnedInitialState) {
       syncTabData._zenPinnedInitialState = tabData._zenPinnedInitialState;

@@ -1194,26 +1194,26 @@ class nsZenWindowSync {
     this.#syncItemForAllWindows(item, flags);
   }
 
+  #notifyWorkspaceItemChanged(data) {
+    Services.obs.notifyObservers(null, "zen-workspace-item-changed", data);
+  }
+
+  #notifyMetaChanged() {
+    this.#notifyWorkspaceItemChanged("meta~global");
+  }
+
   #notifySyncItemChanged(item) {
     if (!item?.id) {
       return;
     }
 
     if (item.isZenFolder) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `f~${item.id}`
-      );
+      this.#notifyWorkspaceItemChanged(`f~${item.id}`);
       return;
     }
 
     if (item.ownerGlobal?.gBrowser?.isTab(item)) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${item.id}`
-      );
+      this.#notifyWorkspaceItemChanged(`t~${item.id}`);
     }
   }
 
@@ -1382,13 +1382,6 @@ class nsZenWindowSync {
     // zenSyncId must be preserved so other devices can recognise it.
     if (!tab.id) {
       tab.id = this.#newTabSyncId;
-      if (tab.pinned && !isUnsyncedWindow) {
-        Services.obs.notifyObservers(
-          null,
-          "zen-workspace-item-changed",
-          `t~${tab.id}`
-        );
-      }
     }
     if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
       return;
@@ -1440,32 +1433,26 @@ class nsZenWindowSync {
   }
 
   on_ZenTabIconChanged(aEvent) {
-    if (!aEvent.target?._zenContentsVisible) {
+    const tab = aEvent.target;
+    if (!tab?._zenContentsVisible) {
       // No need to sync icon changes for tabs that aren't active in this window.
       return;
     }
-    if (aEvent.target?.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${aEvent.target.id}`
-      );
+    if (tab.id) {
+      this.#notifyWorkspaceItemChanged(`t~${tab.id}`);
     }
-    this.#maybeEditAllTabsEntryImage(aEvent.target);
+    this.#maybeEditAllTabsEntryImage(tab);
     return this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_ICON);
   }
 
   on_ZenTabLabelChanged(aEvent) {
-    if (!aEvent.target?._zenContentsVisible) {
+    const tab = aEvent.target;
+    if (!tab?._zenContentsVisible) {
       // No need to sync label changes for tabs that aren't active in this window.
       return;
     }
-    if (aEvent.target?.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${aEvent.target.id}`
-      );
+    if (tab.id) {
+      this.#notifyWorkspaceItemChanged(`t~${tab.id}`);
     }
     return this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_LABEL);
   }
@@ -1474,11 +1461,7 @@ class nsZenWindowSync {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
     if (tab.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `t~${tab.id}`
-      );
+      this.#notifyWorkspaceItemChanged(`t~${tab.id}`);
     }
     if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
       return;
@@ -1677,11 +1660,7 @@ class nsZenWindowSync {
       return;
     }
     this.#notifySyncItemChanged(tabGroup);
-    Services.obs.notifyObservers(
-      null,
-      "zen-workspace-item-changed",
-      "meta~global"
-    );
+    this.#notifyMetaChanged();
     const window = tabGroup.ownerGlobal;
     const isFolder = tabGroup.isZenFolder;
     const isSplitView = tabGroup.hasAttribute("split-view-group");
@@ -1716,11 +1695,7 @@ class nsZenWindowSync {
   on_TabGroupRemoved(aEvent) {
     const tabGroup = aEvent.target;
     this.#notifySyncItemChanged(tabGroup);
-    Services.obs.notifyObservers(
-      null,
-      "zen-workspace-item-changed",
-      "meta~global"
-    );
+    this.#notifyMetaChanged();
     const window = tabGroup.ownerGlobal;
     this.#runOnAllWindows(window, win => {
       const targetGroup = this.getItemFromWindow(win, tabGroup.id);
@@ -1737,11 +1712,7 @@ class nsZenWindowSync {
   on_TabGroupMoved(aEvent) {
     const tabGroup = aEvent.target;
     this.#notifySyncItemChanged(tabGroup);
-    Services.obs.notifyObservers(
-      null,
-      "zen-workspace-item-changed",
-      "meta~global"
-    );
+    this.#notifyMetaChanged();
     this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_MOVE);
     return Promise.resolve();
   }

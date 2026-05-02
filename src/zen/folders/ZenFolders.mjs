@@ -686,13 +686,6 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     }
 
     this.#groupInit(folder);
-    if (folder.id) {
-      Services.obs.notifyObservers(
-        null,
-        "zen-workspace-item-changed",
-        `f~${folder.id}`
-      );
-    }
     return folder;
   }
 

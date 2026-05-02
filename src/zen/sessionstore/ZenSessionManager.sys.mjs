@@ -948,7 +948,7 @@ export class nsZenSessionManager {
     if (!sidebar) {
       return {};
     }
-    return JSON.parse(JSON.stringify(sidebar));
+    return sidebar;
   }
 
   replaceSidebarData(sidebar, soon = true) {
