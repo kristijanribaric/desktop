@@ -238,8 +238,6 @@ class nsZenWorkspaces {
       tab.setUserContextId(targetUserContextId);
     }
 
-    gZenPinnedTabManager.syncDefaultUserContextId(tab);
-
     if (tab.hasAttribute("zen-essential")) {
       const essentialsSection = this.getEssentialsSection(tab);
       if (essentialsSection && tab.parentNode !== essentialsSection) {
@@ -686,6 +684,8 @@ class nsZenWorkspaces {
           }
         }
 
+        gZenPinnedTabManager.syncDefaultUserContextId(existingTab);
+
         // Visual updates.
         if (
           tabData.image &&
@@ -780,6 +780,7 @@ class nsZenWorkspaces {
           gZenPinnedTabManager.addToEssentials(newTab, { force: true });
           // Restore the tab's session state (URL / history) from pinnedInitialState.
           gZenPinnedTabManager.resetPinnedTab(newTab);
+          gZenPinnedTabManager.syncDefaultUserContextId(newTab);
         } else {
           // restoreInitialTabData sets workspace-id, static label/icon, and
           // _zenPinnedInitialState (preventing ZenWindowSync from overwriting
@@ -815,6 +816,7 @@ class nsZenWorkspaces {
               folder.addTabs([newTab]);
             }
           }
+          gZenPinnedTabManager.syncDefaultUserContextId(newTab);
         }
       } else {
         // --- UNPINNED TAB CREATION ---
@@ -844,6 +846,7 @@ class nsZenWorkspaces {
             folder.addTabs([newTab]);
           }
         }
+        gZenPinnedTabManager.syncDefaultUserContextId(newTab);
       }
     }
 

@@ -610,7 +610,6 @@ class nsZenWindowSync {
       ) {
         aTargetItem.setUserContextId(originalUserContextId);
       }
-      gZenPinnedTabManager.syncDefaultUserContextId(aTargetItem);
 
       if (originalIsEssential !== targetIsEssential) {
         if (originalIsEssential) {
@@ -636,6 +635,10 @@ class nsZenWindowSync {
       isEssential: originalIsEssential,
       isPinned: originalIsPinned,
     });
+
+    if (isTab) {
+      gZenPinnedTabManager.syncDefaultUserContextId(aTargetItem);
+    }
   }
 
   /**
