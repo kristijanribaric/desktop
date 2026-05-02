@@ -14,9 +14,8 @@ class ZenSessionStore extends nsZenPreloadedFeature {
   });
 
   restoreInitialTabData(tab, tabData) {
-    if (typeof tab.setUserContextId === "function") {
-      tab.setUserContextId(tabData.userContextId || 0);
-    }
+    tab.setUserContextId(tabData.userContextId || 0);
+
     if (tabData.zenWorkspace) {
       tab.setAttribute("zen-workspace-id", tabData.zenWorkspace);
     }
