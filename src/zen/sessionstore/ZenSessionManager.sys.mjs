@@ -612,29 +612,23 @@ export class nsZenSessionManager {
     );
     this.#collectWindowData(windows);
     lazy.ZenSyncStore.noteSidebarDataChanged(this.#sidebar);
-    // This would save the data to disk asynchronously or when quitting the app.
     let sidebar = this.#sidebarWithoutCloning;
-    this.#file.data = sidebar;
-    if (soon) {
-      this.#file.saveSoon();
-    } else {
-      this.#file._save();
-    }
+    this.#persistSidebarData(soon);
     lazy.ZenLiveFoldersManager.saveState(soon);
     this.#debounceRegeneration();
     this.log(`Saving Zen session data with ${sidebar.tabs?.length || 0} tabs`);
   }
 
   getSidebarData() {
-    const sidebar = this.#sidebar;
-    if (!sidebar) {
-      return {};
-    }
-    return sidebar;
+    return this.#sidebar;
   }
 
   replaceSidebarData(sidebar, soon = true) {
     this.#sidebar = sidebar || {};
+    this.#persistSidebarData(soon);
+  }
+
+  #persistSidebarData(soon) {
     this.#file.data = this.#sidebarWithoutCloning;
     if (soon) {
       this.#file.saveSoon();

@@ -1287,22 +1287,12 @@ class nsZenWorkspaces {
     } else {
       workspacesData.push(workspaceData);
     }
-    Services.obs.notifyObservers(
-      null,
-      "zen-workspace-item-changed",
-      `s~${workspaceData.uuid}`,
-    );
     this.#propagateWorkspaceData();
   }
 
   removeWorkspace(windowID) {
     let { promise, resolve } = Promise.withResolvers();
     this.#deleteWorkspaceOwnedTabs(windowID);
-    Services.obs.notifyObservers(
-      null,
-      "zen-workspace-item-changed",
-      `s~${windowID}`,
-    );
     let workspacesData = this.getWorkspaces();
     // Remove the workspace from the cache
     workspacesData = workspacesData.filter(
@@ -1436,14 +1426,6 @@ class nsZenWorkspaces {
       return;
     }
 
-    // track the previous positions of workspaces so that we can notify observers for only the reordered workspace
-    const previousPositions = new Map(
-      this._workspaceCache.map((workspace, index) => [
-        workspace.uuid,
-        typeof workspace.position === "number" ? workspace.position : index,
-      ]),
-    );
-
     const workspaces = [...this._workspaceCache];
     const workspace = workspaces.find(w => w.uuid === id);
     if (!workspace) {
@@ -1473,18 +1455,6 @@ class nsZenWorkspaces {
     if (currentIndex !== newPosition) {
       const orderedWorkspaces = this.#normalizeWorkspacePositions(workspaces);
       this._workspaceCache = orderedWorkspaces;
-
-      for (const ws of orderedWorkspaces) {
-        if (previousPositions.get(ws.uuid) === ws.position) {
-          continue;
-        }
-        Services.obs.notifyObservers(
-          null,
-          "zen-workspace-item-changed",
-          `s~${ws.uuid}`,
-        );
-      }
-
       this.#propagateWorkspaceData(orderedWorkspaces);
     }
   }

@@ -11,19 +11,19 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 class ZenSyncManager {
-  _lastSnapshot = null;
+  #lastSnapshot = null;
 
   getSidebarData() {
     return lazy.ZenSessionStore.getSidebarData();
   }
 
   seedSnapshot(sidebar) {
-    this._lastSnapshot = this.#buildSnapshot(sidebar || {});
+    this.#lastSnapshot = this.#buildSnapshot(sidebar || {});
   }
 
   noteSidebarDataChanged(sidebar) {
     const snapshot = this.#buildSnapshot(sidebar || {});
-    const prev = this._lastSnapshot;
+    const prev = this.#lastSnapshot;
 
     if (prev) {
       for (const [uuid, hash] of snapshot.spaces) {
@@ -47,7 +47,7 @@ class ZenSyncManager {
       }
     }
 
-    this._lastSnapshot = snapshot;
+    this.#lastSnapshot = snapshot;
   }
 
   async applyIncomingBatch(pulled, removals) {
