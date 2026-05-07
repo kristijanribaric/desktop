@@ -18,19 +18,15 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
-// ---------------------------------------------------------------------------
-// Record
-// ---------------------------------------------------------------------------
-
+/**
+ * Sync record wrapper for workspace and container items stored in the
+ * Workspaces engine collection.
+ */
 export class ZenWorkspacesRecord extends CryptoWrapper {
   _logName = "Sync.Record.ZenWorkspaces";
 }
 
 ZenWorkspacesRecord.prototype.type = "workspaces";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function parseRecordId(id) {
   const sep = id.indexOf("~");
@@ -58,10 +54,10 @@ function stripSyncFields(data) {
   return rest;
 }
 
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
-
+/**
+ * Sync store implementation that serializes local workspace and container
+ * state into records and applies incoming remote changes.
+ */
 class ZenWorkspacesStore extends Store {
   constructor(name, engine) {
     super(name, engine);
@@ -257,10 +253,10 @@ class ZenWorkspacesStore extends Store {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tracker
-// ---------------------------------------------------------------------------
-
+/**
+ * Sync tracker that watches workspace and contextual identity observers and
+ * marks the corresponding record IDs as changed.
+ */
 class ZenWorkspacesTracker extends Tracker {
   _changedIDs = {};
   _ignoreAll = false;
@@ -327,10 +323,10 @@ class ZenWorkspacesTracker extends Tracker {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Engine
-// ---------------------------------------------------------------------------
-
+/**
+ * Sync engine entrypoint that wires the Workspaces record, store, and tracker
+ * implementations into Firefox Sync.
+ */
 export class ZenWorkspacesEngine extends SyncEngine {
   static get name() {
     return "Workspaces";
