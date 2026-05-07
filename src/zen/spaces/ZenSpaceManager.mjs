@@ -173,11 +173,9 @@ class nsZenWorkspaces {
   /**
    * Applies live sync changes: updates workspace cache, removes deleted items,
    * then creates/updates pulled items.
-   * Called on ONE window by ZenSessionManager; ZenWindowSync propagates
-   * new/removed items to every other open window automatically.
    *
-   * @param {{ spaces: Array, tabs: Array, folders: Array }} pulled  Reconcile-pulled items.
-   * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} removals  Items to remove.
+   * @param {{ spaces: Array}} pulled  Reconcile-pulled items.
+   * @param {{ spaces: Array}} removals  Items to remove.
    */
   async _applySyncChanges(pulled, removals = {}) {
     if (!this.shouldHaveWorkspaces || this.privateWindowOrDisabled) {
