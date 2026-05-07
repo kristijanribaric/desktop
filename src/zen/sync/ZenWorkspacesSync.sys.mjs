@@ -69,7 +69,7 @@ class ZenWorkspacesStore extends Store {
 
   async getAllIDs() {
     const ids = {};
-    const sidebar = lazy.ZenSyncStore.getCurrentSidebarData();
+    const sidebar = lazy.ZenSyncStore.getSidebarData();
 
     for (const space of sidebar.spaces || []) {
       if (space.uuid) {
@@ -89,7 +89,7 @@ class ZenWorkspacesStore extends Store {
     if (!parsed) {
       return false;
     }
-    const sidebar = lazy.ZenSyncStore.getCurrentSidebarData();
+    const sidebar = lazy.ZenSyncStore.getSidebarData();
 
     switch (parsed.type) {
       case "space":
@@ -111,7 +111,7 @@ class ZenWorkspacesStore extends Store {
       return record;
     }
 
-    const sidebar = lazy.ZenSyncStore.getCurrentSidebarData();
+    const sidebar = lazy.ZenSyncStore.getSidebarData();
 
     switch (parsed.type) {
       case "space": {
@@ -179,7 +179,6 @@ class ZenWorkspacesStore extends Store {
 
     // Suppress change tracking while applying incoming data to prevent
     // feedback loops where applied items get re-uploaded immediately.
-    // TODO: KR Check if needed
     this.engine._tracker.ignoreAll = true;
     try {
       await lazy.ZenSyncStore.applyIncomingBatch(pulled, removals);
@@ -213,7 +212,6 @@ class ZenWorkspacesStore extends Store {
   }
 
   async _applySingle(record) {
-    // TODO: KR Check if needed
     this.engine._tracker.ignoreAll = true;
     try {
       if (record.deleted) {

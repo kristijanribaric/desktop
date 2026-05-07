@@ -13,7 +13,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 class ZenSyncManager {
   _lastSnapshot = null;
 
-  getCurrentSidebarData() {
+  getSidebarData() {
     return lazy.ZenSessionStore.getSidebarData();
   }
 

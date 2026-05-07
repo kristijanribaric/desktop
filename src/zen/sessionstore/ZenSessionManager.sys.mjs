@@ -633,7 +633,6 @@ export class nsZenSessionManager {
     return sidebar;
   }
 
-  // TODO: KR Check if it can be replaced with saveState()
   replaceSidebarData(sidebar, soon = true) {
     this.#sidebar = sidebar || {};
     this.#file.data = this.#sidebarWithoutCloning;
@@ -642,20 +641,6 @@ export class nsZenSessionManager {
     } else {
       this.#file._save();
     }
-  }
-
-  // TODO: KR Check if really needed, currently using getSidebarData instead
-  getCurrentSidebarData() {
-    const state = lazy.SessionStore.getCurrentState(true);
-    let windows = state?.windows || [];
-    windows = windows.filter(win => this.#isWindowSaveable(win));
-    if (!windows.length) {
-      return this.getSidebarData();
-    }
-
-    const sidebarData = { lastCollected: Date.now() };
-    this.#collectTabsData(sidebarData, windows);
-    return JSON.parse(JSON.stringify(sidebarData));
   }
 
   /**
