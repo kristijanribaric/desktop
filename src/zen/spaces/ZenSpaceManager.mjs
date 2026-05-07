@@ -170,6 +170,67 @@ class nsZenWorkspaces {
     }
   }
 
+  /**
+   * Applies live sync changes: updates workspace cache, removes deleted items,
+   * then creates/updates pulled items.
+   * Called on ONE window by ZenSessionManager; ZenWindowSync propagates
+   * new/removed items to every other open window automatically.
+   *
+   * @param {{ spaces: Array, tabs: Array, folders: Array }} pulled  Reconcile-pulled items.
+   * @param {{ spaces: Array, tabs: Array, folders: Array, containers: Array }} removals  Items to remove.
+   */
+  async _applySyncChanges(pulled, removals = {}) {
+    if (!this.shouldHaveWorkspaces || this.privateWindowOrDisabled) {
+      return;
+    }
+    await this.promiseInitialized;
+
+    // 1. Update workspace cache (remove deleted, merge pulled)
+    const removedSpaceIds = new Set((removals.spaces || []).map(s => s.uuid));
+    if (removedSpaceIds.size || pulled.spaces?.length) {
+      const localMap = new Map(
+        this._workspaceCache
+          .filter(w => !removedSpaceIds.has(w.uuid))
+          .map(w => [w.uuid, w]),
+      );
+      for (const space of pulled.spaces || []) {
+        const existing = localMap.get(space.uuid);
+        localMap.set(space.uuid, existing ? { ...existing, ...space } : space);
+      }
+      await this.propagateWorkspaces(
+        this.#getOrderedWorkspacesByPosition(Array.from(localMap.values())),
+      );
+      this.#propagateWorkspaceData();
+    }
+  }
+
+  #normalizeWorkspacePositions(workspaces = []) {
+    return workspaces.map((workspace, index) => {
+      return {
+        ...workspace,
+        position: index,
+      };
+    });
+  }
+
+  #getOrderedWorkspacesByPosition(workspaces = []) {
+    const orderedWorkspaces = [...workspaces]
+      .map((workspace, index) => ({ workspace, index }))
+      .sort((a, b) => {
+        const aPosition =
+          typeof a.workspace.position === "number"
+            ? a.workspace.position
+            : a.index;
+        const bPosition =
+          typeof b.workspace.position === "number"
+            ? b.workspace.position
+            : b.index;
+        return aPosition - bPosition || a.index - b.index;
+      })
+      .map(({ workspace }) => workspace);
+    return this.#normalizeWorkspacePositions(orderedWorkspaces);
+  }
+
   #afterLoadInit() {
     const onResize = (...args) => {
       requestAnimationFrame(() => {
@@ -690,7 +751,7 @@ class nsZenWorkspaces {
   }
 
   getWorkspacesForSessionStore() {
-    const spaces = this.getWorkspaces();
+    const spaces = this.#normalizeWorkspacePositions(this.getWorkspaces());
     let spacesForSS = [];
     for (const space of spaces) {
       let newSpace = { ...space };
@@ -723,7 +784,9 @@ class nsZenWorkspaces {
 
     this._workspaceBookmarksCache = { bookmarks, lastChangeTimestamp };
 
-    return this._workspaceCache;
+
+    // TODO: KR Changed this to _workspaceBookmarksCache instead of _workspaceCache, check if this is correct
+    return this._workspaceBookmarksCache;
   }
 
   restoreWorkspacesFromSessionStore(aWinData = {}) {
@@ -1230,12 +1293,22 @@ class nsZenWorkspaces {
     } else {
       workspacesData.push(workspaceData);
     }
+    Services.obs.notifyObservers(
+      null,
+      "zen-workspace-item-changed",
+      `s~${workspaceData.uuid}`,
+    );
     this.#propagateWorkspaceData();
   }
 
   removeWorkspace(windowID) {
     let { promise, resolve } = Promise.withResolvers();
     this.#deleteWorkspaceOwnedTabs(windowID);
+    Services.obs.notifyObservers(
+      null,
+      "zen-workspace-item-changed",
+      `s~${windowID}`,
+    );
     let workspacesData = this.getWorkspaces();
     // Remove the workspace from the cache
     workspacesData = workspacesData.filter(
@@ -1299,6 +1372,7 @@ class nsZenWorkspaces {
   }
 
   propagateWorkspaces(aWorkspaces) {
+    aWorkspaces = this.#normalizeWorkspacePositions(aWorkspaces);
     const previousWorkspaces = this._workspaceCache || [];
     let promises = [];
     let hasChanged = false;
@@ -1367,30 +1441,57 @@ class nsZenWorkspaces {
     if (this.privateWindowOrDisabled) {
       return;
     }
-    const workspaces = this._workspaceCache;
+
+    // track the previous positions of workspaces so that we can notify observers for only the reordered workspace
+    const previousPositions = new Map(
+      this._workspaceCache.map((workspace, index) => [
+        workspace.uuid,
+        typeof workspace.position === "number" ? workspace.position : index,
+      ]),
+    );
+
+    const workspaces = [...this._workspaceCache];
     const workspace = workspaces.find(w => w.uuid === id);
     if (!workspace) {
       console.warn(`Workspace with ID ${id} not found for reordering.`);
       return;
     }
+
     // Remove the workspace from its current position
     const currentIndex = workspaces.indexOf(workspace);
     if (currentIndex === -1) {
       console.warn(`Workspace with ID ${id} not found in the list.`);
       return;
     }
-    workspaces.splice(currentIndex, 1);
+
     // Insert the workspace at the new position
-    if (newPosition < 0 || newPosition > workspaces.length) {
+    if (newPosition < 0 || newPosition >= workspaces.length) {
       console.warn(
         `Invalid position ${newPosition} for reordering workspace with ID ${id}.`
       );
       return;
     }
+
+    workspaces.splice(currentIndex, 1);
     workspaces.splice(newPosition, 0, workspace);
+
     // Propagate the changes if the order has changed
     if (currentIndex !== newPosition) {
-      this.#propagateWorkspaceData();
+      const orderedWorkspaces = this.#normalizeWorkspacePositions(workspaces);
+      this._workspaceCache = orderedWorkspaces;
+
+      for (const ws of orderedWorkspaces) {
+        if (previousPositions.get(ws.uuid) === ws.position) {
+          continue;
+        }
+        Services.obs.notifyObservers(
+          null,
+          "zen-workspace-item-changed",
+          `s~${ws.uuid}`,
+        );
+      }
+
+      this.#propagateWorkspaceData(orderedWorkspaces);
     }
   }
 
@@ -2441,7 +2542,7 @@ class nsZenWorkspaces {
       for (const tab of gBrowser.tabs) {
         if (
           !tab.hasAttribute("zen-workspace-id") &&
-          !tab.hasAttribute("zen-workspace-id")
+          !tab.hasAttribute("zen-essential")
         ) {
           tab.setAttribute("zen-workspace-id", workspace.uuid);
         }
