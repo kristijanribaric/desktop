@@ -288,7 +288,11 @@ class ZenWorkspacesTracker extends Tracker {
       return;
     }
     if (topic === "zen-workspace-item-changed") {
-      this._trackChange(data);
+      const type = subject?.wrappedJSObject?.type;
+      const id = subject?.wrappedJSObject?.id;
+      if (type && id) {
+        this._trackChange(`${type}~${id}`);
+      }
     } else if (topic.startsWith("contextual-identity-")) {
       const id = subject?.wrappedJSObject?.userContextId;
       if (id) {
