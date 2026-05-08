@@ -10,7 +10,6 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   ZenLiveFoldersManager:
     "resource:///modules/zen/ZenLiveFoldersManager.sys.mjs",
-  ZenSyncStore: "resource:///modules/zen/ZenSyncManager.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
@@ -610,24 +609,17 @@ export class nsZenSessionManager {
       }
     );
     this.#collectWindowData(windows);
+    // This would save the data to disk asynchronously or when quitting the app.
     let sidebar = this.#sidebarWithoutCloning;
-    this.#persistSidebarData(soon);
-    lazy.ZenLiveFoldersManager.saveState(soon);
-    this.#debounceRegeneration();
-    this.log(`Saving Zen session data with ${sidebar.tabs?.length || 0} tabs`);
-  }
-
-  getSidebarData() {
-    return this.#sidebar;
-  }
-
-  #persistSidebarData(soon) {
-    this.#file.data = this.#sidebarWithoutCloning;
+    this.#file.data = sidebar;
     if (soon) {
       this.#file.saveSoon();
     } else {
       this.#file._save();
     }
+    lazy.ZenLiveFoldersManager.saveState(soon);
+    this.#debounceRegeneration();
+    this.log(`Saving Zen session data with ${sidebar.tabs?.length || 0} tabs`);
   }
 
   /**
