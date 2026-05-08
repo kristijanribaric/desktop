@@ -313,7 +313,6 @@ export class nsZenSessionManager {
       }
     }
     delete this._dataFromFile;
-    lazy.ZenSyncStore.seedSnapshot(this.#sidebar);
   }
 
   get #shouldRestoreOnlyPinned() {
@@ -611,7 +610,6 @@ export class nsZenSessionManager {
       }
     );
     this.#collectWindowData(windows);
-    lazy.ZenSyncStore.noteSidebarDataChanged(this.#sidebar);
     let sidebar = this.#sidebarWithoutCloning;
     this.#persistSidebarData(soon);
     lazy.ZenLiveFoldersManager.saveState(soon);
@@ -622,7 +620,7 @@ export class nsZenSessionManager {
   getSidebarData() {
     return this.#sidebar;
   }
-  
+
   #persistSidebarData(soon) {
     this.#file.data = this.#sidebarWithoutCloning;
     if (soon) {

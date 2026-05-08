@@ -5,59 +5,19 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
 class ZenSyncManager {
-  #lastSnapshot = null;
-
-  getSidebarData() {
-    return lazy.ZenSessionStore.getSidebarData();
-  }
-
-  seedSnapshot(sidebar) {
-    this.#lastSnapshot = this.#buildSnapshot(sidebar || {});
-  }
-
-  noteSidebarDataChanged(sidebar) {
-    const snapshot = this.#buildSnapshot(sidebar || {});
-    const prev = this.#lastSnapshot;
-
-    if (prev) {
-      for (const [uuid, hash] of snapshot.spaces) {
-        if (prev.spaces.get(uuid) !== hash) {
-          Services.obs.notifyObservers(
-            { wrappedJSObject: { type: "s", id: uuid } },
-            "zen-workspace-item-changed");
-        }
-      }
-
-      for (const uuid of prev.spaces.keys()) {
-        if (!snapshot.spaces.has(uuid)) {
-          Services.obs.notifyObservers(
-            { wrappedJSObject: { type: "s", id: uuid } },
-            "zen-workspace-item-changed");
-        }
-      }
-    }
-
-    this.#lastSnapshot = snapshot;
-  }
-
+  
   async applyIncomingBatch(pulled, removals) {
     try {
-      let sidebar = lazy.ZenSessionStore.getSidebarData();
 
       this.#applyIncomingContainers(
         pulled.containers || [],
         removals.containers || [],
       );
-      this.#removeDeletedItems(sidebar, removals);
-      this.#mergeIncomingItems(sidebar, pulled);
-
-      this.seedSnapshot(sidebar);
 
       const win = Services.wm.getMostRecentWindow("navigator:browser");
       if (win?.gZenWorkspaces && !win.gZenWorkspaces.privateWindowOrDisabled) {
@@ -148,18 +108,6 @@ class ZenSyncManager {
     }
   }
 
-  #buildSnapshot(sidebar) {
-    const spaces = new Map();
-    const spaceList = sidebar.spaces || [];
-    for (let i = 0; i < spaceList.length; i++) {
-      const space = spaceList[i];
-      if (space.uuid) {
-        spaces.set(space.uuid, JSON.stringify({ ...space, _pos: i }));
-      }
-    }
-
-    return { spaces };
-  }
 }
 
 export const ZenSyncStore = new ZenSyncManager();

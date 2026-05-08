@@ -14,7 +14,7 @@ index 5702ff28cc22206f5ce16584dac8a78d816562ce..1cd7f0fd222f5b6d2a98d7b5b76c2206
 -    let userContextId = ++this._lastUserContextId;
 +    let userContextId;
 +    if (
-+      id !== null &&
++      id !== null && id !== undefined &&
 +      !this._identities.some(identity => identity.userContextId === id)
 +    ) {
 +      userContextId = id;
