@@ -622,12 +622,7 @@ export class nsZenSessionManager {
   getSidebarData() {
     return this.#sidebar;
   }
-
-  replaceSidebarData(sidebar, soon = true) {
-    this.#sidebar = sidebar || {};
-    this.#persistSidebarData(soon);
-  }
-
+  
   #persistSidebarData(soon) {
     this.#file.data = this.#sidebarWithoutCloning;
     if (soon) {

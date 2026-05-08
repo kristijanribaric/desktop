@@ -61,8 +61,6 @@ class ZenSyncManager {
       this.#removeDeletedItems(sidebar, removals);
       this.#mergeIncomingItems(sidebar, pulled);
 
-
-      lazy.ZenSessionStore.replaceSidebarData(sidebar, true);
       this.seedSnapshot(sidebar);
 
       const win = Services.wm.getMostRecentWindow("navigator:browser");
