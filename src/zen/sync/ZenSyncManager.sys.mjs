@@ -30,9 +30,7 @@ class ZenSyncManager {
         if (prev.spaces.get(uuid) !== hash) {
           Services.obs.notifyObservers(
             { wrappedJSObject: { type: "s", id: uuid } },
-            "zen-workspace-item-changed",
-            null,
-          );
+            "zen-workspace-item-changed");
         }
       }
 
@@ -40,9 +38,7 @@ class ZenSyncManager {
         if (!snapshot.spaces.has(uuid)) {
           Services.obs.notifyObservers(
             { wrappedJSObject: { type: "s", id: uuid } },
-            "zen-workspace-item-changed",
-            null,
-          );
+            "zen-workspace-item-changed");
         }
       }
     }
