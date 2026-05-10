@@ -18,6 +18,16 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
+const RECORD_ID_PREFIX_BY_TYPE = Object.freeze({
+  space: "s",
+  container: "c",
+});
+
+const RECORD_TYPE_BY_PREFIX = Object.freeze({
+  s: "space",
+  c: "container",
+});
+
 /**
  * Sync record wrapper for workspace and container items stored in the
  * Workspaces engine collection.
@@ -35,11 +45,15 @@ function parseRecordId(id) {
   }
   const prefix = id.slice(0, sep);
   const key = id.slice(sep + 1);
-  const typeMap = {
-    s: "space",
-    c: "container",
-  };
-  return { type: typeMap[prefix] || prefix, key };
+  return { type: RECORD_TYPE_BY_PREFIX[prefix] || prefix, key };
+}
+
+function createRecordId(type, id) {
+  const prefix = RECORD_ID_PREFIX_BY_TYPE[type];
+  if (!prefix) {
+    throw new Error(`Unknown Workspaces Sync record type: ${type}`);
+  }
+  return `${prefix}~${id}`;
 }
 
 /**
@@ -71,12 +85,12 @@ class ZenWorkspacesStore extends Store {
 
     for (const space of spaces || []) {
       if (space.uuid) {
-        ids[`s~${space.uuid}`] = true;
+        ids[createRecordId("space", space.uuid)] = true;
       }
     }
 
     for (const c of lazy.ContextualIdentityService.getPublicIdentities()) {
-      ids[`c~${c.userContextId}`] = true;
+      ids[createRecordId("container", c.userContextId)] = true;
     }
 
     return ids;
@@ -294,19 +308,22 @@ class ZenWorkspacesTracker extends Tracker {
       const type = subject?.wrappedJSObject?.type;
       const id = subject?.wrappedJSObject?.id;
       if (type && id) {
-        this._trackChange(`${type}~${id}`);
+        this._trackChange({ type, id });
       }
     } else if (topic.startsWith("contextual-identity-")) {
       const id = subject?.wrappedJSObject?.userContextId;
       if (id) {
-        this._trackChange(`c~${id}`);
+        this._trackChange({ type: "container", id });
       }
     }
   }
 
-  _trackChange(id) {
-    this.#changedIDs[id] = Date.now() / 1000;
-    this.score += SCORE_INCREMENT_XLARGE;
+  _trackChange(data) {
+    if (data.type && data.id) {
+      const id = createRecordId(data.type, data.id);
+      this.#changedIDs[id] = Date.now() / 1000;
+      this.score += SCORE_INCREMENT_XLARGE;
+    }
   }
 
   async getChangedIDs() {

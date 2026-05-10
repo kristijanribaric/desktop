@@ -1289,7 +1289,7 @@ class nsZenWorkspaces {
     }
     // notify sync observers
     Services.obs.notifyObservers(
-      { wrappedJSObject: { type: "s", id: workspaceData.uuid } },
+      { wrappedJSObject: { type: "space", id: workspaceData.uuid } },
       "zen-workspace-item-changed",
     );
     this.#propagateWorkspaceData();
@@ -1300,7 +1300,7 @@ class nsZenWorkspaces {
     this.#deleteWorkspaceOwnedTabs(windowID);
     // notify sync observers
     Services.obs.notifyObservers(
-      { wrappedJSObject: { type: "s", id: windowID } },
+      { wrappedJSObject: { type: "space", id: windowID } },
       "zen-workspace-item-changed",
     );
     let workspacesData = this.getWorkspaces();
@@ -1480,7 +1480,7 @@ class nsZenWorkspaces {
         }
         // notify sync observers
         Services.obs.notifyObservers(
-          { wrappedJSObject: { type: "s", id: ws.uuid } },
+          { wrappedJSObject: { type: "space", id: ws.uuid } },
           "zen-workspace-item-changed",
         );
       }
