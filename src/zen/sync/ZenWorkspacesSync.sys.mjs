@@ -261,15 +261,15 @@ class ZenWorkspacesStore extends Store {
  * marks the corresponding record IDs as changed.
  */
 class ZenWorkspacesTracker extends Tracker {
-  _changedIDs = {};
-  _ignoreAll = false;
+  #changedIDs = {};
+  #ignoreAll = false;
 
   get ignoreAll() {
-    return this._ignoreAll;
+    return this.#ignoreAll;
   }
 
   set ignoreAll(value) {
-    this._ignoreAll = value;
+    this.#ignoreAll = value;
   }
 
   onStart() {
@@ -287,7 +287,7 @@ class ZenWorkspacesTracker extends Tracker {
   }
 
   observe(subject, topic, data) {
-    if (this._ignoreAll) {
+    if (this.#ignoreAll) {
       return;
     }
     if (topic === "zen-workspace-item-changed") {
@@ -305,28 +305,28 @@ class ZenWorkspacesTracker extends Tracker {
   }
 
   _trackChange(id) {
-    this._changedIDs[id] = Date.now() / 1000;
+    this.#changedIDs[id] = Date.now() / 1000;
     this.score += SCORE_INCREMENT_XLARGE;
   }
 
   async getChangedIDs() {
-    return { ...this._changedIDs };
+    return { ...this.#changedIDs };
   }
 
   async addChangedID(id, when) {
-    this._changedIDs[id] = when;
+    this.#changedIDs[id] = when;
     return true;
   }
 
   async removeChangedID(...ids) {
     for (const id of ids) {
-      delete this._changedIDs[id];
+      delete this.#changedIDs[id];
     }
     return true;
   }
 
   clearChangedIDs() {
-    this._changedIDs = {};
+    this.#changedIDs = {};
   }
 }
 
