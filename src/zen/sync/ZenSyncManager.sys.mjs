@@ -9,11 +9,17 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
 
+function normalizeUserContextId(value) {
+  const normalized = typeof value === "string" ? Number(value) : value;
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    return null;
+  }
+  return normalized;
+}
+
 class ZenSyncManager {
-  
   async applyIncomingBatch(pulled, removals) {
     try {
-
       this.#applyIncomingContainers(
         pulled.containers || [],
         removals.containers || [],
@@ -25,25 +31,36 @@ class ZenSyncManager {
       }
     } catch (e) {
       console.error("ZenSyncManager: Failed to apply incoming sync data:", e);
+      throw e;
     }
   }
 
   #applyIncomingContainers(pulledContainers, removedContainers) {
-    const localContainers =
-      lazy.ContextualIdentityService.getPublicIdentities();
+    const localContainersById = new Map(
+      lazy.ContextualIdentityService
+        .getPublicIdentities()
+        .map(container => [container.userContextId, container]),
+    );
 
     for (const container of pulledContainers) {
       if (!container.name) {
         continue;
       }
 
-      const existsLocally = localContainers.some(
-        c => String(c.userContextId) === String(container.userContextId),
-      );
+      const userContextId = normalizeUserContextId(container.userContextId);
+      if (userContextId === null) {
+        console.warn(
+          "ZenSyncManager: Ignoring incoming container with invalid userContextId",
+          { container },
+        );
+        continue;
+      }
+
+      const existsLocally = localContainersById.has(userContextId);
 
       if (existsLocally) {
         lazy.ContextualIdentityService.update(
-          container.userContextId,
+          userContextId,
           container.name,
           container.icon,
           container.color,
@@ -55,15 +72,17 @@ class ZenSyncManager {
         container.name,
         container.icon,
         container.color,
-        container.userContextId,
+        userContextId,
       );
+      if (createdIdentity) {
+        localContainersById.set(createdIdentity.userContextId, createdIdentity);
+      }
       if (
         createdIdentity &&
-        String(createdIdentity.userContextId) !==
-        String(container.userContextId)
+        createdIdentity.userContextId !== userContextId
       ) {
         console.warn("ZenSyncManager: Container sync created unexpected ID", {
-          requestedId: container.userContextId,
+          requestedId: userContextId,
           createdId: createdIdentity.userContextId,
           name: container.name,
         });
@@ -71,8 +90,22 @@ class ZenSyncManager {
     }
 
     for (const container of removedContainers) {
+      const userContextId = normalizeUserContextId(container.userContextId);
+      if (userContextId === null) {
+        console.warn(
+          "ZenSyncManager: Ignoring container removal with invalid userContextId",
+          { container },
+        );
+        continue;
+      }
+
+      if (!localContainersById.has(userContextId)) {
+        continue;
+      }
+
       try {
-        lazy.ContextualIdentityService.remove(container.userContextId);
+        lazy.ContextualIdentityService.remove(userContextId);
+        localContainersById.delete(userContextId);
       } catch {
         // Container may already be gone locally.
       }

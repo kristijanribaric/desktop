@@ -56,6 +56,14 @@ function createRecordId(type, id) {
   return `${prefix}~${id}`;
 }
 
+function normalizeUserContextId(value) {
+  const normalized = typeof value === "string" ? Number(value) : value;
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    return null;
+  }
+  return normalized;
+}
+
 /**
  * Strips the sync-envelope fields (`id` and `type`) from incoming record data
  * and restores the item's real identity key where needed
@@ -82,7 +90,6 @@ class ZenWorkspacesStore extends Store {
     const win = Services.wm.getMostRecentWindow("navigator:browser");
     const spaces = win?.gZenWorkspaces?.getWorkspaces();
 
-
     for (const space of spaces || []) {
       if (space.uuid) {
         ids[createRecordId("space", space.uuid)] = true;
@@ -102,7 +109,7 @@ class ZenWorkspacesStore extends Store {
       return false;
     }
     const win = Services.wm.getMostRecentWindow("navigator:browser");
-    const spaces = win?.gZenWorkspaces?.getWorkspaces();
+    const spaces = win?.gZenWorkspaces?.getWorkspaces() || [];
 
     switch (parsed.type) {
       case "space":
@@ -125,7 +132,7 @@ class ZenWorkspacesStore extends Store {
     }
 
     const win = Services.wm.getMostRecentWindow("navigator:browser");
-    const spaces = win?.gZenWorkspaces?.getWorkspaces();
+    const spaces = win?.gZenWorkspaces?.getWorkspaces() || [];
 
     switch (parsed.type) {
       case "space": {
@@ -210,9 +217,18 @@ class ZenWorkspacesStore extends Store {
       case "space":
         removals.spaces.push({ uuid: parsed.key });
         break;
-      case "container":
-        removals.containers.push({ userContextId: parsed.key });
+      case "container": {
+        const userContextId = normalizeUserContextId(parsed.key);
+        if (userContextId === null) {
+          console.warn(
+            "ZenWorkspacesStore: Ignoring container removal with invalid userContextId",
+            { id },
+          );
+          break;
+        }
+        removals.containers.push({ userContextId });
         break;
+      }
     }
   }
 

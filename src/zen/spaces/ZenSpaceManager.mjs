@@ -192,6 +192,9 @@ class nsZenWorkspaces {
           .map(w => [w.uuid, w]),
       );
       for (const space of pulled.spaces || []) {
+        if (!space?.uuid) {
+          continue;
+        }
         const existing = localMap.get(space.uuid);
         localMap.set(space.uuid, existing ? { ...existing, ...space } : space);
       }
@@ -1436,7 +1439,8 @@ class nsZenWorkspaces {
       return;
     }
 
-    // track the previous positions of workspaces so that we can notify observers for only the reordered workspace
+    // Track previous positions so we only notify observers for workspaces whose
+    // position changed during the reorder.
     const previousPositions = new Map(
       this._workspaceCache.map((workspace, index) => [
         workspace.uuid,
