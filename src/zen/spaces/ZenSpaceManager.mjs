@@ -205,17 +205,8 @@ class nsZenWorkspaces {
     }
   }
 
-  #normalizeWorkspacePositions(workspaces = []) {
-    return workspaces.map((workspace, index) => {
-      return {
-        ...workspace,
-        position: index,
-      };
-    });
-  }
-
   #getOrderedWorkspacesByPosition(workspaces = []) {
-    const orderedWorkspaces = [...workspaces]
+    return [...workspaces]
       .map((workspace, index) => ({ workspace, index }))
       .sort((a, b) => {
         const aPosition =
@@ -228,8 +219,11 @@ class nsZenWorkspaces {
             : b.index;
         return aPosition - bPosition || a.index - b.index;
       })
-      .map(({ workspace }) => workspace);
-    return this.#normalizeWorkspacePositions(orderedWorkspaces);
+      .map(({ workspace }) => {
+        // strip the position property that comes from pulled workspaces
+        const { position, ...rest } = workspace;
+        return rest;
+      });
   }
 
   #afterLoadInit() {
@@ -752,7 +746,7 @@ class nsZenWorkspaces {
   }
 
   getWorkspacesForSessionStore() {
-    const spaces = this.#normalizeWorkspacePositions(this.getWorkspaces());
+    const spaces = this.getWorkspaces();
     let spacesForSS = [];
     for (const space of spaces) {
       let newSpace = { ...space };
@@ -1369,7 +1363,6 @@ class nsZenWorkspaces {
   }
 
   propagateWorkspaces(aWorkspaces) {
-    aWorkspaces = this.#normalizeWorkspacePositions(aWorkspaces);
     const previousWorkspaces = this._workspaceCache || [];
     let promises = [];
     let hasChanged = false;
@@ -1444,7 +1437,7 @@ class nsZenWorkspaces {
     const previousPositions = new Map(
       this._workspaceCache.map((workspace, index) => [
         workspace.uuid,
-        typeof workspace.position === "number" ? workspace.position : index,
+        index,
       ]),
     );
 
@@ -1475,11 +1468,10 @@ class nsZenWorkspaces {
 
     // Propagate the changes if the order has changed
     if (currentIndex !== newPosition) {
-      const orderedWorkspaces = this.#normalizeWorkspacePositions(workspaces);
-      this._workspaceCache = orderedWorkspaces;
+      this._workspaceCache = workspaces;
 
-      for (const ws of orderedWorkspaces) {
-        if (previousPositions.get(ws.uuid) === ws.position) {
+      for (const [i, ws] of workspaces.entries()) {
+        if (previousPositions.get(ws.uuid) === i) {
           continue;
         }
         // notify sync observers
@@ -1489,7 +1481,7 @@ class nsZenWorkspaces {
         );
       }
 
-      this.#propagateWorkspaceData(orderedWorkspaces);
+      this.#propagateWorkspaceData(workspaces);
     }
   }
 
