@@ -11,6 +11,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
+  ZenSyncStore: "resource:///modules/zen/ZenSyncManager.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "browserBackgroundElement", () => {
@@ -1284,22 +1285,19 @@ class nsZenWorkspaces {
     } else {
       workspacesData.push(workspaceData);
     }
-    // notify sync observers
-    Services.obs.notifyObservers(
-      { wrappedJSObject: { type: "space", id: workspaceData.uuid } },
-      "zen-workspace-item-changed",
-    );
+    // mark item as changed for sync
+    lazy.ZenSyncStore.markItemChanged({ type: "space", id: workspaceData.uuid });
+
     this.#propagateWorkspaceData();
   }
 
   removeWorkspace(windowID) {
     let { promise, resolve } = Promise.withResolvers();
     this.#deleteWorkspaceOwnedTabs(windowID);
-    // notify sync observers
-    Services.obs.notifyObservers(
-      { wrappedJSObject: { type: "space", id: windowID } },
-      "zen-workspace-item-changed",
-    );
+
+    // mark item as changed for sync
+    lazy.ZenSyncStore.markItemChanged({ type: "space", id: windowID });
+
     let workspacesData = this.getWorkspaces();
     // Remove the workspace from the cache
     workspacesData = workspacesData.filter(
@@ -1474,11 +1472,8 @@ class nsZenWorkspaces {
         if (previousPositions.get(ws.uuid) === i) {
           continue;
         }
-        // notify sync observers
-        Services.obs.notifyObservers(
-          { wrappedJSObject: { type: "space", id: ws.uuid } },
-          "zen-workspace-item-changed",
-        );
+        // mark item as changed for sync
+        lazy.ZenSyncStore.markItemChanged({ type: "space", id: ws.uuid });
       }
 
       this.#propagateWorkspaceData(workspaces);

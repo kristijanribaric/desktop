@@ -87,10 +87,9 @@ class ZenWorkspacesStore extends Store {
 
   async getAllIDs() {
     const ids = {};
-    const win = Services.wm.getMostRecentWindow("navigator:browser");
-    const spaces = win?.gZenWorkspaces?.getWorkspaces();
+    const sidebar = lazy.ZenSyncStore.getSidebarData();
 
-    for (const space of spaces || []) {
+    for (const space of sidebar.spaces || []) {
       if (space.uuid) {
         ids[createRecordId("space", space.uuid)] = true;
       }
@@ -108,12 +107,11 @@ class ZenWorkspacesStore extends Store {
     if (!parsed) {
       return false;
     }
-    const win = Services.wm.getMostRecentWindow("navigator:browser");
-    const spaces = win?.gZenWorkspaces?.getWorkspaces() || [];
+    const sidebar = lazy.ZenSyncStore.getSidebarData();
 
     switch (parsed.type) {
       case "space":
-        return spaces.some(s => s.uuid === parsed.key);
+        return (sidebar.spaces || []).some(s => s.uuid === parsed.key);
       case "container":
         return lazy.ContextualIdentityService.getPublicIdentities().some(
           c => String(c.userContextId) === parsed.key,
@@ -131,11 +129,11 @@ class ZenWorkspacesStore extends Store {
       return record;
     }
 
-    const win = Services.wm.getMostRecentWindow("navigator:browser");
-    const spaces = win?.gZenWorkspaces?.getWorkspaces() || [];
+    const sidebar = lazy.ZenSyncStore.getSidebarData();
 
     switch (parsed.type) {
       case "space": {
+        const spaces = sidebar.spaces || [];
         const idx = spaces.findIndex(s => s.uuid === parsed.key);
         if (idx === -1) {
           record.deleted = true;

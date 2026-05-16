@@ -5,6 +5,7 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
 });
@@ -18,8 +19,52 @@ function normalizeUserContextId(value) {
 }
 
 class ZenSyncManager {
+
+  getSidebarData() {
+    return lazy.ZenSessionStore.getSidebarData();
+  }
+
+  /**
+   * Whether to ignore changes to items. This is used to prevent
+   * infinite loops when applying incoming sync changes.
+   * @type {boolean}
+   */
+  #ignoreChanges = false;
+
+  #changedItems = new Set();
+
+  markItemChanged(item) {
+    if (item.type && item.id && !this.#ignoreChanges) {
+      this.#changedItems.add(`${item.type}~${item.id}`);
+    }
+  }
+
+  #getChangedItems() {
+    return Array.from(this.#changedItems.values()).map(item => {
+      const [type, id] = item.split("~");
+      return { type, id };
+    });
+  }
+
+  #clearChangedItems() {
+    this.#changedItems.clear();
+  }
+
+
+  notifyAboutChanges() {
+    const changedItems = this.#getChangedItems();
+
+    for (const item of changedItems) {
+      Services.obs.notifyObservers(
+        { wrappedJSObject: item },
+        "zen-workspace-item-changed",
+      );
+    }
+    this.#clearChangedItems();
+  }
   async applyIncomingBatch(pulled, removals) {
     try {
+      this.#ignoreChanges = true;
       this.#applyIncomingContainers(
         pulled.containers || [],
         removals.containers || [],
@@ -32,6 +77,8 @@ class ZenSyncManager {
     } catch (e) {
       console.error("ZenSyncManager: Failed to apply incoming sync data:", e);
       throw e;
+    } finally {
+      this.#ignoreChanges = false;
     }
   }
 
