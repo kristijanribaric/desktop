@@ -158,36 +158,6 @@ class ZenSyncManager {
       }
     }
   }
-
-  #removeDeletedItems(sidebar, removals) {
-    const removedSpaceIds = new Set((removals.spaces || []).map(s => s.uuid));
-
-    if (removedSpaceIds.size) {
-      sidebar.spaces = (sidebar.spaces || []).filter(
-        space => !removedSpaceIds.has(space.uuid),
-      );
-    }
-  }
-
-  #mergeIncomingItems(sidebar, pulled) {
-    if (pulled.spaces?.length) {
-      const spaceMap = new Map(
-        (sidebar.spaces || []).map(space => [space.uuid, space]),
-      );
-      for (const space of pulled.spaces) {
-        if (!space.uuid) {
-          continue;
-        }
-        const existing = spaceMap.get(space.uuid);
-        spaceMap.set(space.uuid, existing ? { ...existing, ...space } : space);
-      }
-      sidebar.spaces = Array.from(spaceMap.values());
-      sidebar.spaces.sort(
-        (a, b) => (a.position ?? Infinity) - (b.position ?? Infinity),
-      );
-    }
-  }
-
 }
 
 export const ZenSyncStore = new ZenSyncManager();
