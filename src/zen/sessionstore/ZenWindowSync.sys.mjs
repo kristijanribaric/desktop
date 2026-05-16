@@ -13,6 +13,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
   // eslint-disable-next-line mozilla/valid-lazy
   ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
+  ZenSyncStore: "resource:///modules/zen/ZenSyncManager.sys.mjs",
   TabStateCache: "resource:///modules/sessionstore/TabStateCache.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
@@ -1328,6 +1329,27 @@ class nsZenWindowSync {
     });
   }
 
+  #notifySyncItemChanged(item) {
+    if (!item?.id) {
+      return;
+    }
+
+
+
+    if (item.isZenFolder && !item.isLiveFolder) {
+      // mark folder as changed
+      lazy.ZenSyncStore.markItemChanged({ type: "folder", id: item.id });
+
+      return;
+    }
+
+    if (!item.hasAttribute("zen-empty-tab")) {
+      // mark tab as changed
+      lazy.ZenSyncStore.markItemChanged({ type: "tab", id: item.id });
+    }
+
+  }
+
   /* Mark: Event Handlers */
 
   on_TabOpen(aEvent, { ignoreExistingId = false } = {}) {
@@ -1339,7 +1361,12 @@ class nsZenWindowSync {
       return;
     }
     tab._zenContentsVisible = true;
-    tab.id = this.#newTabSyncId;
+    // Only assign a new sync ID if one isn't already set.  A pre-existing id
+    // means the tab came from an external source (e.g. Firefox Sync) and its
+    // zenSyncId must be preserved so other devices can recognise it.
+    if (!tab.id) {
+      tab.id = this.#newTabSyncId;
+    }
     if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
       return;
     }
@@ -1373,6 +1400,8 @@ class nsZenWindowSync {
       // No need to sync icon changes for tabs that aren't active in this window.
       return;
     }
+
+    this.#notifySyncItemChanged(aEvent.target);
     this.#maybeEditAllTabsEntryImage(aEvent.target);
     return this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_ICON);
   }
@@ -1382,12 +1411,17 @@ class nsZenWindowSync {
       // No need to sync label changes for tabs that aren't active in this window.
       return;
     }
+    this.#notifySyncItemChanged(aEvent.target);
+
     return this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_LABEL);
   }
 
   on_TabHide(aEvent) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
+    const id = aEvent.target.id;
+    this.#notifySyncItemChanged(aEvent.target);
+
     if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
       return;
     }
@@ -1402,6 +1436,8 @@ class nsZenWindowSync {
   on_TabShow(aEvent) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
+    this.#notifySyncItemChanged(aEvent.target);
+
     if (lazy.gSyncOnlyPinnedTabs && !tab.pinned) {
       return;
     }
@@ -1414,12 +1450,15 @@ class nsZenWindowSync {
   }
 
   on_TabMove(aEvent) {
+    this.#notifySyncItemChanged(aEvent.target);
     this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_MOVE);
     return Promise.resolve();
   }
 
   on_TabPinned(aEvent) {
     const tab = aEvent.target;
+    this.#notifySyncItemChanged(tab);
+
     // There are cases where the pinned state is changed but we don't
     // wan't to override the initial state we stored when the tab was created.
     // For example, when session restore pins a tab again.
@@ -1439,6 +1478,7 @@ class nsZenWindowSync {
 
   on_TabUnpinned(aEvent) {
     const tab = aEvent.target;
+    this.#notifySyncItemChanged(tab);
     this.#runOnAllWindows(null, win => {
       const targetTab = this.getItemFromWindow(win, tab.id);
       if (targetTab) {
@@ -1453,16 +1493,19 @@ class nsZenWindowSync {
   }
 
   on_TabAddedToEssentials(aEvent) {
+    this.#notifySyncItemChanged(aEvent.target);
     return this.on_TabMove(aEvent);
   }
 
   on_TabRemovedFromEssentials(aEvent) {
+    this.#notifySyncItemChanged(aEvent.target);
     return this.on_TabMove(aEvent);
   }
 
   on_TabClose(aEvent) {
     const tab = aEvent.target;
     const window = tab.ownerGlobal;
+    this.#notifySyncItemChanged(tab);
     this.#runOnAllWindows(window, win => {
       const targetTab = this.getItemFromWindow(win, tab.id);
       if (targetTab) {
@@ -1619,6 +1662,7 @@ class nsZenWindowSync {
 
   on_TabGroupRemoved(aEvent) {
     const tabGroup = aEvent.target;
+    this.#notifySyncItemChanged(tabGroup);
     const window = tabGroup.ownerGlobal;
     this.#runOnAllWindows(window, win => {
       const targetGroup = this.getItemFromWindow(win, tabGroup.id);
@@ -1633,10 +1677,12 @@ class nsZenWindowSync {
   }
 
   on_TabGroupMoved(aEvent) {
+    this.#notifySyncItemChanged(aEvent.target);
     return this.on_TabMove(aEvent);
   }
 
   on_TabGroupUpdate(aEvent) {
+    this.#notifySyncItemChanged(aEvent.target);
     return this.#delegateGenericSyncEvent(
       aEvent,
       SYNC_FLAG_ICON | SYNC_FLAG_LABEL
