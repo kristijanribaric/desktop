@@ -311,8 +311,6 @@ class nsZenWorkspaces {
           new CustomEvent("TabGroupUpdate", { bubbles: true }),
         );
       } else {
-        // Create new folder — skip the placeholder empty tab since real tabs
-        // will be added in step 2 from the pulled tabs.
         gZenFolders.createFolder([], {
           id: folderData.id,
           label: folderData.name || "Folder",
@@ -320,7 +318,6 @@ class nsZenWorkspaces {
           collapsed: folderData.collapsed,
           saveOnWindowClose: folderData.saveOnWindowClose,
           isLiveFolder: folderData.isLiveFolder,
-          skipEmptyTab: true,
         });
         if (folderData.userIcon !== undefined) {
           const createdFolder = document.getElementById(folderData.id);
