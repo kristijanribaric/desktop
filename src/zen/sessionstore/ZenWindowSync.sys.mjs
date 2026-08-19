@@ -1408,6 +1408,13 @@ class nsZenWindowSync {
   #trackSyncChangesForEvent(aEvent) {
     const item = aEvent.target;
     switch (aEvent.type) {
+      case "TabPinned":
+        // on_TabPinned normally does this; replicate it here so synced
+        // pinned tabs still get their initial state recorded correctly.
+        if (!item._zenPinnedInitialState) {
+          this.setPinnedTabState(item);
+        }
+        break;
       case "ZenTabIconChanged":
       case "ZenTabLabelChanged":
         // No mirrored windows exist here, so unlike on_ZenTab*Changed there
