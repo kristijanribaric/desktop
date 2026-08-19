@@ -411,6 +411,9 @@ class nsZenWindowSync {
       !lazy.gWindowSyncEnabled &&
       !UNSYNCED_WINDOW_EVENTS.includes(aEvent.type)
     ) {
+      // mirroring across windows is off, but other devices still need to
+      // know what changed
+      this.#trackSyncChangesForEvent(aEvent);
       return;
     }
     if (INSTANT_EVENTS.includes(aEvent.type)) {
@@ -1391,6 +1394,46 @@ class nsZenWindowSync {
         targetTab._zenPinnedInitialState.image = image;
       }
     });
+  }
+
+  /**
+   * Marks the items an event touched as changed for cross-device sync.
+   * Used when window mirroring is disabled, where the event handlers that
+   * normally do this never run.
+   *
+   * @param {Event} aEvent - The event that was skipped.
+   */
+  #trackSyncChangesForEvent(aEvent) {
+    const item = aEvent.target;
+    switch (aEvent.type) {
+      case "ZenTabIconChanged":
+      case "ZenTabLabelChanged":
+        // No mirrored windows exist here, so unlike on_ZenTab*Changed there
+        // is no need to check which window holds the tab contents.
+        this.#notifySyncItemChanged(item);
+        break;
+      case "ZenTabRemovedFromSplit":
+        if (aEvent.detail?.groupId) {
+          lazy.ZenSyncStore.markSplitChanged(aEvent.detail.groupId);
+        }
+        break;
+      case "ZenSplitViewTabsSplit":
+        if (item?.id) {
+          for (const tab of item.tabs || []) {
+            this.#notifySyncItemChanged(tab);
+          }
+          lazy.ZenSyncStore.markSplitChanged(item.id);
+        }
+        break;
+      case "ZenSplitViewGroupUpdated":
+        if (item?.id) {
+          lazy.ZenSyncStore.markSplitChanged(item.id);
+        }
+        break;
+    }
+    if (SYNC_CHANGE_EVENTS.includes(aEvent.type)) {
+      this.#notifySyncItemChanged(item, aEvent.type);
+    }
   }
 
   #notifySyncItemChanged(item, aEventType) {
