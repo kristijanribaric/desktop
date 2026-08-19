@@ -257,14 +257,28 @@ export class ZenSpaceSyncResolver {
     }
     const existingTab = this.#findTabBySyncId(syncId);
     if (existingTab && this.#win.gBrowser.isTab(existingTab)) {
-      this.#updateExistingIncomingTab(existingTab, tabData);
+      const targetUserContextId = this.#getSyncedTabUserContextId(tabData);
+      if ((existingTab.userContextId || 0) === targetUserContextId) {
+        this.#updateExistingIncomingTab(existingTab, tabData);
+        return;
+      }
+      // a tab's container can't change after creation, so recreate it
+      const wasSelected = existingTab.selected;
+      this.#win.gBrowser.removeTab(existingTab, { animate: false });
+      this.#createIncomingTab(tabData, syncId);
+      if (wasSelected) {
+        const recreatedTab = this.#findTabBySyncId(syncId);
+        if (recreatedTab) {
+          this.#win.gBrowser.selectedTab = recreatedTab;
+        }
+      }
       return;
     }
     this.#createIncomingTab(tabData, syncId);
   }
 
   #updateExistingIncomingTab(existingTab, tabData) {
-    this.#applyIncomingTabContainer(existingTab, tabData);
+    this.#ensureEssentialsPlacement(existingTab);
 
     const isCurrentlyEssential = existingTab.hasAttribute("zen-essential");
     const shouldBeEssential = !!tabData.zenEssential;
@@ -541,20 +555,9 @@ export class ZenSpaceSyncResolver {
     }
   }
 
-  #applyIncomingTabContainer(tab, tabData) {
+  #ensureEssentialsPlacement(tab) {
     if (!tab || !this.#win.gBrowser.isTab(tab)) {
       return;
-    }
-
-    const targetUserContextId = this.#getSyncedTabUserContextId(tabData);
-    const currentUserContextId =
-      parseInt(tab.getAttribute("usercontextid"), 10) || 0;
-
-    if (
-      currentUserContextId !== targetUserContextId &&
-      typeof tab.setUserContextId === "function"
-    ) {
-      tab.setUserContextId(targetUserContextId);
     }
 
     if (tab.hasAttribute("zen-essential")) {

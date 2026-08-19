@@ -8,6 +8,8 @@ support-files = [
   "head.js",
 ]
 
+["browser_sync_apply_container_change.js"]
+
 ["browser_sync_apply_no_echo.js"]
 
 ["browser_sync_tab_label.js"]
