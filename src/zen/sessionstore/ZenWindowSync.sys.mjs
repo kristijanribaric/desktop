@@ -1237,6 +1237,25 @@ class nsZenWindowSync {
   /* Mark: Public API */
 
   /**
+   * Waits until the deferred event queue has fully drained. Used by
+   * ZenSyncManager to keep change suppression active while applying
+   * incoming sync data.
+   *
+   * @returns {Promise<void>} Resolves once no queued events remain.
+   */
+  async waitForEventQueueToDrain() {
+    // bounded so a steady stream of events can't stall the caller forever
+    for (let round = 0; round < 10; round++) {
+      const processedPromise = this.#eventHandlingContext.lastHandlerPromise;
+      await processedPromise;
+      if (processedPromise === this.#eventHandlingContext.lastHandlerPromise) {
+        return;
+      }
+    }
+    this.log("Event queue kept filling up while draining, giving up");
+  }
+
+  /**
    * Sets the initial pinned state for a tab across all windows.
    *
    * @param {object} aTab - The tab to set the pinned state for.

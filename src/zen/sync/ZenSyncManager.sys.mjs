@@ -92,6 +92,8 @@ class ZenSyncManager {
   }
 
   async applyIncomingBatch(pulled, removals) {
+    // let pending local changes get marked before we start suppressing
+    await lazy.ZenWindowSync.waitForEventQueueToDrain();
     try {
       this.#ignoreChanges = true;
       this.#applyIncomingContainers(
@@ -107,7 +109,13 @@ class ZenSyncManager {
       console.error("ZenSyncManager: Failed to apply incoming sync data:", e);
       throw e;
     } finally {
-      this.#ignoreChanges = false;
+      // keep suppressing until the events dispatched by the apply are
+      // processed, otherwise applied items get echoed back to sync
+      try {
+        await lazy.ZenWindowSync.waitForEventQueueToDrain();
+      } finally {
+        this.#ignoreChanges = false;
+      }
     }
   }
 
