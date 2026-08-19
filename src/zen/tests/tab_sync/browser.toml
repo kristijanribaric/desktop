@@ -4,10 +4,11 @@
 
 [DEFAULT]
 prefs = ["zen.window-sync.enabled=true", "zen.urlbar.replace-newtab=false"]
-support-files = [
-  "head.js",
-]
 
-["browser_sync_tab_label.js"]
+["browser_sync_apply_container_change.js"]
 
-["browser_sync_tab_open.js"]
+["browser_sync_apply_no_echo.js"]
+
+["browser_sync_apply_no_window.js"]
+
+["browser_sync_track_without_mirroring.js"]
