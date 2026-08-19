@@ -42,6 +42,9 @@ class ZenSyncManager {
    * Whether to ignore changes to items. This is used to prevent
    * infinite loops when applying incoming sync changes.
    *
+   * Note: a real user change made while this is set gets dropped too. Rare,
+   * and accepted for now.
+   *
    * @type {boolean}
    */
   #ignoreChanges = false;
