@@ -1415,6 +1415,11 @@ class nsZenWindowSync {
           this.setPinnedTabState(item);
         }
         break;
+      case "TabUnpinned":
+        // on_TabUnpinned normally does this; without it the tab would keep
+        // stale pinned state after being unpinned.
+        delete item._zenPinnedInitialState;
+        break;
       case "ZenTabIconChanged":
       case "ZenTabLabelChanged":
         // No mirrored windows exist here, so unlike on_ZenTab*Changed there
