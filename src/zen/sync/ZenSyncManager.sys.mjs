@@ -91,6 +91,14 @@ class ZenSyncManager {
     this.#clearChangedItems();
   }
 
+  /**
+   * Applies an incoming sync batch.
+   *
+   * @param {object} pulled Items to create or update.
+   * @param {object} removals Items to remove.
+   * @returns {Promise<boolean>} False when items needed a browser window but
+   *   none was available, so the caller can retry them on a later sync.
+   */
   async applyIncomingBatch(pulled, removals) {
     // let pending local changes get marked before we start suppressing
     await lazy.ZenWindowSync.waitForEventQueueToDrain();
@@ -102,9 +110,12 @@ class ZenSyncManager {
       );
 
       const win = lazy.ZenWindowSync.firstSyncedWindow;
-      if (win?.gZenWorkspaces) {
-        await win.gZenWorkspaces._applySyncChanges(pulled, removals);
+      if (!win?.gZenWorkspaces) {
+        // containers are window independent and already applied above
+        return !this.#hasWindowBoundItems(pulled, removals);
       }
+      await win.gZenWorkspaces._applySyncChanges(pulled, removals);
+      return true;
     } catch (e) {
       console.error("ZenSyncManager: Failed to apply incoming sync data:", e);
       throw e;
@@ -117,6 +128,19 @@ class ZenSyncManager {
         this.#ignoreChanges = false;
       }
     }
+  }
+
+  /**
+   * Whether a batch contains items that can only be applied to a window.
+   *
+   * @param {...object} batches Incoming pulled and removal batches.
+   * @returns {boolean}
+   */
+  #hasWindowBoundItems(...batches) {
+    const windowBoundKeys = ["spaces", "tabs", "folders", "splits"];
+    return batches.some(batch =>
+      windowBoundKeys.some(key => batch?.[key]?.length)
+    );
   }
 
   #applyIncomingContainers(pulledContainers, removedContainers) {

@@ -297,9 +297,15 @@ class ZenWorkspacesStore extends Store {
       containers: [],
       splits: [],
     };
+    // Records that need a browser window to be applied, so they can be
+    // reported as failed and retried if no window is available.
+    const windowBoundIds = [];
     for (const record of records) {
       if (record.deleted) {
         this._collectRemoval(record.id, removals);
+        if (parseRecordId(record.id)?.type !== RECORD_TYPES.CONTAINER) {
+          windowBoundIds.push(record.id);
+        }
         continue;
       }
       const data = record.cleartext;
@@ -311,6 +317,7 @@ class ZenWorkspacesStore extends Store {
       switch (data.type) {
         case RECORD_TYPES.SPACE:
           pulled.spaces.push(clean);
+          windowBoundIds.push(record.id);
           break;
         case RECORD_TYPES.CONTAINER:
           pulled.containers.push(clean);
@@ -329,6 +336,7 @@ class ZenWorkspacesStore extends Store {
           }
           clean.zenSyncId = syncId;
           pulled.tabs.push(clean);
+          windowBoundIds.push(record.id);
           break;
         }
         case RECORD_TYPES.FOLDER:
@@ -342,6 +350,7 @@ class ZenWorkspacesStore extends Store {
           }
           delete clean.folderId;
           pulled.folders.push(clean);
+          windowBoundIds.push(record.id);
           break;
         case RECORD_TYPES.SPLIT:
           clean.groupId =
@@ -353,6 +362,7 @@ class ZenWorkspacesStore extends Store {
             break;
           }
           pulled.splits.push(clean);
+          windowBoundIds.push(record.id);
           break;
       }
     }
@@ -361,7 +371,17 @@ class ZenWorkspacesStore extends Store {
     // feedback loops where applied items get re-uploaded immediately.
     this.engine._tracker.ignoreAll = true;
     try {
-      await lazy.ZenSyncStore.applyIncomingBatch(pulled, removals);
+      const applied = await lazy.ZenSyncStore.applyIncomingBatch(
+        pulled,
+        removals
+      );
+      if (!applied) {
+        console.warn(
+          "ZenWorkspacesStore: No browser window available, retrying records on a later sync",
+          { count: windowBoundIds.length }
+        );
+        return windowBoundIds;
+      }
     } finally {
       this.engine._tracker.ignoreAll = false;
     }
@@ -421,9 +441,12 @@ class ZenWorkspacesStore extends Store {
           splits: [],
         };
         this._collectRemoval(record.id, removals);
-        await lazy.ZenSyncStore.applyIncomingBatch(
-          { spaces: [], tabs: [], folders: [], containers: [], splits: [] },
-          removals
+        this._throwIfNotApplied(
+          await lazy.ZenSyncStore.applyIncomingBatch(
+            { spaces: [], tabs: [], folders: [], containers: [], splits: [] },
+            removals
+          ),
+          record.id
         );
         return;
       }
@@ -487,15 +510,33 @@ class ZenWorkspacesStore extends Store {
           pulled.splits.push(clean);
           break;
       }
-      await lazy.ZenSyncStore.applyIncomingBatch(pulled, {
-        spaces: [],
-        tabs: [],
-        folders: [],
-        containers: [],
-        splits: [],
-      });
+      this._throwIfNotApplied(
+        await lazy.ZenSyncStore.applyIncomingBatch(pulled, {
+          spaces: [],
+          tabs: [],
+          folders: [],
+          containers: [],
+          splits: [],
+        }),
+        record.id
+      );
     } finally {
       this.engine._tracker.ignoreAll = false;
+    }
+  }
+
+  /**
+   * Throws when a record could not be applied, so Sync marks it as failed
+   * and retries it on a later sync instead of dropping it.
+   *
+   * @param {boolean} applied
+   * @param {string} recordId
+   */
+  _throwIfNotApplied(applied, recordId) {
+    if (!applied) {
+      throw new Error(
+        `ZenWorkspacesStore: No browser window available to apply ${recordId}`
+      );
     }
   }
 
