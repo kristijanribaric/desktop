@@ -1244,7 +1244,8 @@ class nsZenWindowSync {
    * ZenSyncManager to keep change suppression active while applying
    * incoming sync data.
    *
-   * @returns {Promise<void>} Resolves once no queued events remain.
+   * @returns {Promise<boolean>} True once no queued events remain, false if
+   *   still bailed out with events pending.
    */
   async waitForEventQueueToDrain() {
     // bounded so a steady stream of events can't stall the caller forever
@@ -1252,10 +1253,11 @@ class nsZenWindowSync {
       const processedPromise = this.#eventHandlingContext.lastHandlerPromise;
       await processedPromise;
       if (processedPromise === this.#eventHandlingContext.lastHandlerPromise) {
-        return;
+        return true;
       }
     }
     this.log("Event queue kept filling up while draining, giving up");
+    return false;
   }
 
   /**

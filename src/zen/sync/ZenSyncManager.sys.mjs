@@ -121,9 +121,20 @@ class ZenSyncManager {
       throw e;
     } finally {
       // keep suppressing until the events dispatched by the apply are
-      // processed, otherwise applied items get echoed back to sync
+      // processed, otherwise applied items get echoed back to sync. Retry
+      // the drain a few times if it keeps refilling before giving up - a
+      // stray echo is safer than leaving suppression on indefinitely, which
+      // would silently drop real local changes instead.
       try {
-        await lazy.ZenWindowSync.waitForEventQueueToDrain();
+        let drained = false;
+        for (let attempt = 0; attempt < 5 && !drained; attempt++) {
+          drained = await lazy.ZenWindowSync.waitForEventQueueToDrain();
+        }
+        if (!drained) {
+          console.warn(
+            "ZenSyncManager: Event queue never settled after applying incoming sync data, lifting suppression anyway"
+          );
+        }
       } finally {
         this.#ignoreChanges = false;
       }
